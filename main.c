@@ -107,19 +107,15 @@ int main(void)
 
     DL_TimerG_startCounter(TIMER_0_INST);
 
-    // encoder_init();
-
     while (1) {
-        // printLeftEncoderInfo();
-
         // timer_test();
-        patrol_test();
-        beeper_test();
-        led_test();
-        key_test();
+        // patrol_test();
+        // beeper_test();
+        // led_test();
+        // key_test();
         
-        // uart_send_string(UART0,"hello\r\n");
-        // DL_Common_delayCycles(CPUCLK_FREQ);
-        // DL_GPIO_togglePins(LED_PORT, LED_led0_PIN);
+        uart_send_string(UART0,"hello\r\n");
+        DL_Common_delayCycles(CPUCLK_FREQ);
+        DL_GPIO_togglePins(LED_PORT, LED_led0_PIN);
     }
 }

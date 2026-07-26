@@ -3,16 +3,12 @@
 #include <stdint.h>
 
 
-void uart_send_string(UART_Regs* uart, char* str)
-{
-    while (*str != '\0') {
-        DL_UART_Main_transmitData(uart, (uint8_t)*str);
-        str++;
-    }
-}
-
 static void uart_putchar(UART_Regs* uart, char c)
 {
+    /* 等待发送保持寄存器为空（非 FIFO 模式下同样适用） */
+    while (DL_UART_Main_isTXFIFOFull(uart)) {
+        ;
+    }
     DL_UART_Main_transmitData(uart, (uint8_t)c);
 }
 
@@ -21,6 +17,11 @@ static void uart_puts(UART_Regs* uart, const char* str)
     while (*str != '\0') {
         uart_putchar(uart, *str++);
     }
+}
+
+void uart_send_string(UART_Regs* uart, char* str)
+{
+    uart_puts(uart, str);
 }
 
 static void uart_putint(UART_Regs* uart, int num, uint8_t base)
