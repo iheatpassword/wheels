@@ -31,10 +31,10 @@
  */
 
 #include "ti_msp_dl_config.h"
-#include "Driver/key.h"
-#include "Driver/encoder.h"
-#include "Driver/uart.h"
-#include "Driver/gFunc.h"
+#include "Drivers/key.h"
+#include "Drivers/encoder.h"
+#include "Drivers/uart.h"
+#include "Drivers/gFunc.h"
 
 void timer_test(void)
 {
@@ -53,32 +53,18 @@ void timer_test(void)
 // expect phenomenon: if four-way patrol not detect black, led0 on
 void patrol_test(void)
 {
-    uint8_t r1=0, r2=0, l1=0, l2=0;
-    static uint8_t last_all_white = 0;  // 上一次所有传感器都是白色的状态
-    uint8_t current_all_white = 0;
-    
-    // 读取四个巡逻传感器的状态（假设1=检测到黑色）
-    r2 = DL_GPIO_readPins(Patrol_PORT, Patrol_R2_PIN) > 0 ? 1 : 0;
-    r1 = DL_GPIO_readPins(Patrol_PORT, Patrol_R1_PIN) > 0 ? 1 : 0;
-    l2 = DL_GPIO_readPins(Patrol_PORT, Patrol_L2_PIN) > 0 ? 1 : 0;
-    l1 = DL_GPIO_readPins(Patrol_PORT, Patrol_L1_PIN) > 0 ? 1 : 0;
-    
-    // 判断当前是否所有传感器都未检测到黑色（都是白色）
-    current_all_white = (r2 == 0) && (r1 == 0) && (l2 == 0) && (l1 == 0);
-    
-    // 仅在状态发生变化时翻转LED
-    if(current_all_white != last_all_white)
+    uint8_t r2 = (DL_GPIO_readPins(Patrol_PORT, Patrol_R2_PIN) > 0);
+    uint8_t r1 = (DL_GPIO_readPins(Patrol_PORT, Patrol_R1_PIN) > 0);
+    uint8_t l2 = (DL_GPIO_readPins(Patrol_PORT, Patrol_L2_PIN) > 0);
+    uint8_t l1 = (DL_GPIO_readPins(Patrol_PORT, Patrol_L1_PIN) > 0);
+
+    if((r2 == 0) && (r1 == 0) && (l2 == 0) && (l1 == 0))
     {
-        if(current_all_white)
-        {
-            DL_GPIO_setPins(LED_PORT, LED_led0_PIN);   // 全部白色 → LED亮
-        }
-        else
-        {
-            DL_GPIO_clearPins(LED_PORT, LED_led0_PIN); // 检测到黑色 → LED灭
-        }
-        
-        last_all_white = current_all_white;  // 更新状态
+        DL_GPIO_setPins(LED_PORT, LED_led0_PIN);
+    }
+    else
+    {
+        DL_GPIO_clearPins(LED_PORT, LED_led0_PIN);
     }
 }
 
@@ -129,7 +115,7 @@ int main(void)
         // timer_test();
         patrol_test();
         beeper_test();
-        // led_test();
+        led_test();
         key_test();
         
         // uart_send_string(UART0,"hello\r\n");
