@@ -35,6 +35,7 @@
 #include "Drivers/encoder.h"
 #include "Drivers/uart.h"
 #include "Drivers/gFunc.h"
+#include "Drivers/motor.h"
 
 void timer_test(void)
 {
@@ -107,12 +108,15 @@ int main(void)
 
     DL_TimerG_startCounter(TIMER_0_INST);
 
+    motor_init();
+
     while (1) {
+        motor_test();
         // timer_test();
         // patrol_test();
         // beeper_test();
-        led_test();
         // key_test();
+        led_test();
         
         // uart_send_string(UART0,"hello\r\n");
         // DL_Common_delayCycles(CPUCLK_FREQ);
