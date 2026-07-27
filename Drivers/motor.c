@@ -160,3 +160,30 @@ void motor_test(void)
     }
 
 }
+
+void servo_setting(uint16_t ccr)
+{
+    /* 限幅：防止超出舵机机械限位（0.025~0.125 占空比对应 0~180 度） */
+    if (ccr < SEVRO_PWM_MIN_DUTY) {
+        ccr = SEVRO_PWM_MIN_DUTY;
+    } else if (ccr > SEVRO_PWM_MAX_DUTY) {
+        ccr = SEVRO_PWM_MAX_DUTY;
+    }
+
+    DL_TimerG_setCaptureCompareValue(
+        PWM_servo_INST, ccr, DL_TIMER_CC_0_INDEX);
+}
+
+void servo_test(void)
+{
+    static uint16_t ccr=59;
+    static uint32_t last_time;
+    int8_t step=1;
+    if(millis()-last_time>=2000)
+    {
+        ccr+=step;
+        if(ccr>=100||ccr<+20)step=-step;
+        servo_setting(ccr);
+        last_time=millis();
+    }
+}

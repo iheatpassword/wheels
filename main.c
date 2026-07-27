@@ -112,6 +112,7 @@ int main(void)
 
     while (1) {
         motor_test();
+        servo_test();
         // timer_test();
         // patrol_test();
         // beeper_test();
