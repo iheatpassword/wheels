@@ -149,9 +149,9 @@ void motor_test(void)
 {
     static int16_t l_speed=0, r_speed=0;
     static uint32_t last_time=0;
-    static int8_t step=100;
+    static int8_t step=1;
     motor_set_speed_both(l_speed,r_speed);
-    if(millis()-last_time>=2000)
+    if(millis()-last_time>=1000)
     {
         l_speed+=step;
         r_speed-=step;

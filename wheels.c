@@ -120,6 +120,8 @@ int main(void)
 
     Interrupt_Init();
 
+    motor_set_speed_both(25,-125);
+
     while (1) {
         // motor_test();
         // servo_test();
@@ -135,7 +137,7 @@ int main(void)
             int32_t right=encoder_read_right();
             uart_printf(UART0, "left=%5d\r\n",left);
             uart_printf(UART0, "right=%5d\r\n",right);
-            encoder_reset();
+            //encoder_reset();
             
             uart_printf(UART0, "lCounter=%5d\r\n",encoder_left_count);
             uart_printf(UART0, "rCounter=%5d\r\n",encoder_right_count);

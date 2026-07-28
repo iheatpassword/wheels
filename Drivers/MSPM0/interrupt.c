@@ -144,9 +144,8 @@ void GROUP1_IRQHandler(void)
         #endif
         #if defined Encoder_GPIOA_INT_IIDX
         case Encoder_GPIOA_INT_IIDX:
-        switch (DL_GPIO_getPendingInterrupt(GPIOA))
+            switch (DL_GPIO_getPendingInterrupt(GPIOA))
             {
-                case Encoder_GPIOA_INT_IIDX:
                 #if defined Encoder_leftA_IIDX
                 case Encoder_leftA_IIDX:
                     encoder_leftA_isr();
