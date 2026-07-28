@@ -12,7 +12,6 @@ void TIMER_0_INST_IRQHandler(void)
     }
 }
 
-//return systick ms
 extern inline uint32_t millis(void)
 {
     return gMillis;

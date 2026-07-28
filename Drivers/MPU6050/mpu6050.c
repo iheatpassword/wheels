@@ -51,7 +51,7 @@ unsigned char more;
 long quat[4];
 
 #define q30  (1073741824.0f) /* 2^30 = 1073741824 */
-float pitch, roll, yaw;
+float  pitch, roll, yaw;
 
 /* The sensors can be mounted onto the board in any orientation. The mounting
  * matrix seen below tells the MPL how to rotate the raw data from thei

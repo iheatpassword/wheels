@@ -103,6 +103,7 @@ void beeper_test(void)
 
 int main(void)
 {
+    uint32_t last_time=0;
     
     SYSCFG_DL_init();
     SysTick_Init();
@@ -114,7 +115,10 @@ int main(void)
     DL_TimerG_startCounter(TIMER_0_INST);
 
     motor_init();
+    encoder_init();
     MPU6050_Init();
+
+    Interrupt_Init();
 
     while (1) {
         // motor_test();
@@ -124,8 +128,24 @@ int main(void)
         // beeper_test();
         // key_test();
         led_test();
-        int32_t Pitch=(int)pitch;
-        uart_printf(UART0, "pitch=%d\r\n",Pitch);
+
+        if(millis()-last_time>10)
+        {
+            int32_t left=encoder_read_left();
+            int32_t right=encoder_read_right();
+            uart_printf(UART0, "left=%5d\r\n",left);
+            uart_printf(UART0, "right=%5d\r\n",right);
+            encoder_reset();
+            
+            uart_printf(UART0, "lCounter=%5d\r\n",encoder_left_count);
+            uart_printf(UART0, "rCounter=%5d\r\n",encoder_right_count);
+            last_time=millis();
+        }
+
+        // uart_printf(UART0, "pitch=%5.1f\r\n",pitch);
+        // uart_printf(UART0, "roll=%5.1f\r\n",roll);
+        // uart_printf(UART0, "yaw=%5.1f\r\n",yaw);
+        //uart_printf(UART0, "pie=%4.2f\r\n",3.1415926535);
 
         
         // uart_send_string(UART0,"hello\r\n");

@@ -2,10 +2,8 @@
 #include <stdarg.h>
 #include <stdint.h>
 
-
 static void uart_putchar(UART_Regs* uart, char c)
 {
-    /* 等待发送保持寄存器为空（非 FIFO 模式下同样适用） */
     while (DL_UART_Main_isTXFIFOFull(uart)) {
         ;
     }
@@ -62,6 +60,123 @@ static void uart_putint(UART_Regs* uart, int num, uint8_t base)
     }
 }
 
+static void uart_putuint(UART_Regs* uart, uint32_t num, uint8_t base)
+{
+    char buf[32];
+    int8_t i = 0;
+
+    if (num == 0) {
+        uart_putchar(uart, '0');
+        return;
+    }
+
+    while (num > 0) {
+        uint8_t digit = (uint8_t)(num % base);
+        if (digit < 10) {
+            buf[i++] = (char)('0' + digit);
+        } else {
+            buf[i++] = (char)('a' + digit - 10);
+        }
+        num /= base;
+    }
+
+    while (i > 0) {
+        uart_putchar(uart, buf[--i]);
+    }
+}
+
+static uint32_t uart_pow10(uint8_t exp)
+{
+    uint32_t result = 1;
+    for (uint8_t i = 0; i < exp; i++) {
+        result *= 10;
+    }
+    return result;
+}
+
+static void uart_putfloat(UART_Regs* uart, float num, uint8_t width, uint8_t precision)
+{
+    char buf[32];
+    int8_t i = 0;
+    uint8_t is_neg = 0;
+    uint32_t int_part;
+    uint32_t frac_part;
+    uint8_t pad_len;
+
+    if (precision == 0) {
+        precision = 6;
+    }
+
+    if (num < 0.0f) {
+        is_neg = 1;
+        num = -num;
+    }
+
+    int_part = (uint32_t)num;
+
+    uint32_t pow_val = uart_pow10(precision);
+    frac_part = (uint32_t)((num - (float)int_part) * (float)pow_val + 0.5f);
+
+    if (frac_part >= pow_val) {
+        int_part++;
+        frac_part -= pow_val;
+    }
+
+    if (int_part == 0) {
+        buf[i++] = '0';
+    } else {
+        int8_t j = 0;
+        char int_buf[16];
+        uint32_t temp = int_part;
+        while (temp > 0) {
+            int_buf[j++] = (char)('0' + (temp % 10));
+            temp /= 10;
+        }
+        while (j > 0) {
+            buf[i++] = int_buf[--j];
+        }
+    }
+
+    buf[i++] = '.';
+
+    if (frac_part == 0) {
+        for (uint8_t j = 0; j < precision; j++) {
+            buf[i++] = '0';
+        }
+    } else {
+        int8_t j = 0;
+        char frac_buf[16];
+        uint32_t temp_frac = frac_part;
+        while (temp_frac > 0) {
+            frac_buf[j++] = (char)('0' + (temp_frac % 10));
+            temp_frac /= 10;
+        }
+
+        for (int8_t k = precision - j; k > 0; k--) {
+            buf[i++] = '0';
+        }
+
+        while (j > 0) {
+            buf[i++] = frac_buf[--j];
+        }
+    }
+
+    buf[i] = '\0';
+
+    pad_len = width - i - is_neg;
+    if (pad_len > 0) {
+        for (uint8_t j = 0; j < pad_len; j++) {
+            uart_putchar(uart, ' ');
+        }
+    }
+
+    if (is_neg) {
+        uart_putchar(uart, '-');
+    }
+
+    uart_puts(uart, buf);
+}
+
 void uart_printf(UART_Regs* uart, char* fmt, ...)
 {
     va_list args;
@@ -70,23 +185,42 @@ void uart_printf(UART_Regs* uart, char* fmt, ...)
     while (*fmt != '\0') {
         if (*fmt == '%') {
             fmt++;
+            uint8_t width = 0;
+            uint8_t precision = 0;
+
+            while (*fmt >= '0' && *fmt <= '9') {
+                width = width * 10 + (*fmt - '0');
+                fmt++;
+            }
+
+            if (*fmt == '.') {
+                fmt++;
+                while (*fmt >= '0' && *fmt <= '9') {
+                    precision = precision * 10 + (*fmt - '0');
+                    fmt++;
+                }
+            }
+
             switch (*fmt) {
                 case 'd':
                 case 'i':
                     uart_putint(uart, va_arg(args, int), 10);
                     break;
                 case 'u':
-                    uart_putint(uart, (int)va_arg(args, uint32_t), 10);
+                    uart_putuint(uart, va_arg(args, uint32_t), 10);
                     break;
                 case 'x':
                 case 'X':
-                    uart_putint(uart, va_arg(args, int), 16);
+                    uart_putuint(uart, va_arg(args, uint32_t), 16);
                     break;
                 case 'c':
                     uart_putchar(uart, (char)va_arg(args, int));
                     break;
                 case 's':
                     uart_puts(uart, va_arg(args, char*));
+                    break;
+                case 'f':
+                    uart_putfloat(uart, (float)va_arg(args, double), width, precision);
                     break;
                 case '%':
                     uart_putchar(uart, '%');

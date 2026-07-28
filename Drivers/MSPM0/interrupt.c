@@ -2,6 +2,7 @@
 #include "interrupt.h"
 #include "clock.h"
 #include "mpu6050.h"
+#include "encoder.h"
 // #include "bno08x_uart_rvc.h"
 // #include "wit.h"
 // #include "vl53l0x.h"
@@ -136,6 +137,33 @@ void GROUP1_IRQHandler(void)
                     Read_VL53L0X();
                     break;
                 #endif
+                
+                default:
+                    break;
+            }
+        #endif
+        #if defined Encoder_GPIOA_INT_IIDX
+        case Encoder_GPIOA_INT_IIDX:
+        switch (DL_GPIO_getPendingInterrupt(GPIOA))
+            {
+                case Encoder_GPIOA_INT_IIDX:
+                #if defined Encoder_leftA_IIDX
+                case Encoder_leftA_IIDX:
+                    encoder_leftA_isr();
+                    break;
+                #endif
+
+                #if defined Encoder_leftB_IIDX
+                case Encoder_leftB_IIDX:
+                    encoder_leftB_isr();
+                    break;
+                #endif
+
+                #if defined Encoder_rightA_IIDX
+                case Encoder_rightA_IIDX:
+                    encoder_rightA_isr();
+                    break;
+                #endif
 
                 default:
                     break;
@@ -161,6 +189,12 @@ void GROUP1_IRQHandler(void)
                 #if (defined GPIO_VL53L0X_PIN_VL53L0X_GPIO1_PORT) && (GPIO_VL53L0X_PIN_VL53L0X_GPIO1_PORT == GPIOB)
                 case GPIO_VL53L0X_PIN_VL53L0X_GPIO1_IIDX:
                     Read_VL53L0X();
+                    break;
+                #endif
+
+                #if defined Encoder_rightB_IIDX
+                case Encoder_rightB_IIDX:
+                    encoder_rightB_isr();
                     break;
                 #endif
 
