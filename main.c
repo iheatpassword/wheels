@@ -37,6 +37,10 @@
 #include "Drivers/gFunc.h"
 #include "Drivers/motor.h"
 
+#include "clock.h"
+#include "interrupt.h"
+#include "mpu6050.h"
+
 void timer_test(void)
 {
     static uint8_t i=0;
@@ -101,6 +105,7 @@ int main(void)
 {
     
     SYSCFG_DL_init();
+    SysTick_Init();
 
     NVIC_ClearPendingIRQ(UART_0_INST_INT_IRQN);
     NVIC_EnableIRQ(UART_0_INST_INT_IRQN);
@@ -109,15 +114,19 @@ int main(void)
     DL_TimerG_startCounter(TIMER_0_INST);
 
     motor_init();
+    MPU6050_Init();
 
     while (1) {
-        motor_test();
-        servo_test();
+        // motor_test();
+        // servo_test();
         // timer_test();
         // patrol_test();
         // beeper_test();
         // key_test();
         led_test();
+        int32_t Pitch=(int)pitch;
+        uart_printf(UART0, "pitch=%d\r\n",Pitch);
+
         
         // uart_send_string(UART0,"hello\r\n");
         // DL_Common_delayCycles(CPUCLK_FREQ);

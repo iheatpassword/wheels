@@ -1,10 +1,8 @@
 #include "gFunc.h"
-#define SYSTICK
 volatile uint32_t gMillis=0;
 
 void TIMER_0_INST_IRQHandler(void)
 {
-    #ifndef SYSTICK
     switch (DL_TimerG_getPendingInterrupt(TIMER_0_INST)) {
         case DL_TIMER_IIDX_ZERO:
             gMillis++;//although TIMER_0 is count down, gMillis auto increment
@@ -12,18 +10,6 @@ void TIMER_0_INST_IRQHandler(void)
         default:
             break;    
     }
-    #else
-    ;
-    #endif
-}
-
-void SysTick_Handler(void)
-{
-    #ifdef SYSTICK
-    gMillis++;
-    #else
-    ;
-    #endif
 }
 
 //return systick ms
