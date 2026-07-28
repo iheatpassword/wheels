@@ -6,9 +6,9 @@
 
 #define MOTOR_PWM_PERIOD           (125U)
 #define MOTOR_PWM_MAX_DUTY         (MOTOR_PWM_PERIOD - 1U)
-#define SEVRO_PWM_PERIOD            (800U)
-#define SEVRO_PWM_MIN_DUTY          (20U)//angle = 0
-#define SEVRO_PWM_MAX_DUTY          (100U)//angle = 180
+#define SEVRO_PWM_PERIOD            (1800U)
+#define SEVRO_PWM_MIN_DUTY          (75U)//(45U)//angle = 0
+#define SEVRO_PWM_MAX_DUTY          (195U)//(225U)//angle = 180
 
 typedef enum {
     MOTOR_LEFT  = 0U,

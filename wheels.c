@@ -36,6 +36,7 @@
 #include "Drivers/uart.h"
 #include "Drivers/gFunc.h"
 #include "Drivers/motor.h"
+#include "App/patrol.h"
 
 #include "clock.h"
 #include "interrupt.h"
@@ -99,12 +100,30 @@ void beeper_test(void)
        last_time=millis();
     }
 }
+void beeper_on(void)
+{
+    DL_GPIO_setPins(Beeper_PORT, Beeper_PIN_0_PIN);
+}
+void beeper_off(void)
+{
+    DL_GPIO_clearPins(Beeper_PORT, Beeper_PIN_0_PIN);
+}
+void beeper_blink(void)
+{
+    DL_GPIO_setPins(Beeper_PORT, Beeper_PIN_0_PIN);
+    DL_Common_delayCycles(CPUCLK_FREQ/500);
+    DL_GPIO_clearPins(Beeper_PORT, Beeper_PIN_0_PIN);
+}
+void wait_for_mpu6050(void)
+{
+    DL_Common_delayCycles(CPUCLK_FREQ/100);
+    beeper_blink();
+}
+
 
 
 int main(void)
-{
-    uint32_t last_time=0;
-    
+{    
     SYSCFG_DL_init();
     SysTick_Init();
 
@@ -120,8 +139,13 @@ int main(void)
 
     Interrupt_Init();
 
-    motor_set_speed_both(25,-125);
+    wait_for_mpu6050();
 
+    // motor_set_speed_both(25,-25);
+
+    uint32_t last_patrol_time = millis();
+    uint32_t encoder_print_count = 0;
+    
     while (1) {
         // motor_test();
         // servo_test();
@@ -131,17 +155,33 @@ int main(void)
         // key_test();
         led_test();
 
-        if(millis()-last_time>10)
+        /* 处理串口命令 */
+        uart_cmd_process();
+        
+        /* 巡线控制：10ms 中断触发，用 millis() 计算实际 dt */
+        if (read_patrol)
         {
-            int32_t left=encoder_read_left();
-            int32_t right=encoder_read_right();
-            uart_printf(UART0, "left=%5d\r\n",left);
-            uart_printf(UART0, "right=%5d\r\n",right);
-            //encoder_reset();
+            uint32_t now = millis();
+            uint32_t dt = now - last_patrol_time;
+            last_patrol_time = now;
             
-            uart_printf(UART0, "lCounter=%5d\r\n",encoder_left_count);
-            uart_printf(UART0, "rCounter=%5d\r\n",encoder_right_count);
-            last_time=millis();
+            /* 防止首次调用或溢出时 dt 异常 */
+            if (dt == 0) dt = 1;
+            if (dt > 100) dt = 10;  /* 异常大时使用标称值 */
+            
+            patrol_line(dt);
+            read_patrol = 0;
+            
+            /* 编码器调试输出：每 100ms 打印一次，避免阻塞控制循环 */
+            // encoder_print_count++;
+            // if (encoder_print_count >= 10)
+            // {
+            //     int32_t left = encoder_read_left();
+            //     int32_t right = encoder_read_right();
+            //     uart_printf(UART0, "left=%5d right=%5d\r\n", left, right);
+            //     encoder_reset();
+            //     encoder_print_count = 0;
+            // }
         }
 
         // uart_printf(UART0, "pitch=%5.1f\r\n",pitch);

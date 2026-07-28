@@ -160,7 +160,8 @@ void motor_test(void)
     }
 
 }
-
+//ccr between 45 and 225(0 to 180)
+//recommand 75 to 195
 void servo_setting(uint16_t ccr)
 {
     /* 限幅：防止超出舵机机械限位（0.025~0.125 占空比对应 0~180 度） */
@@ -176,13 +177,13 @@ void servo_setting(uint16_t ccr)
 
 void servo_test(void)
 {
-    static uint16_t ccr=59;
+    static uint16_t ccr=135;
     static uint32_t last_time;
     int8_t step=1;
-    if(millis()-last_time>=2000)
+    if(millis()-last_time>=1000)
     {
         ccr+=step;
-        if(ccr>=100||ccr<+20)step=-step;
+        if(ccr>=SEVRO_PWM_MAX_DUTY||ccr<=SEVRO_PWM_MIN_DUTY)step=-step;
         servo_setting(ccr);
         last_time=millis();
     }

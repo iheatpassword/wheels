@@ -39,6 +39,7 @@
                                     <listOptionValue value="${PROJECT_ROOT}/Drivers/MPU6050"/>
                                     <listOptionValue value="${PROJECT_ROOT}/Drivers/MSPM0"/>
                                     <listOptionValue value="${PROJECT_ROOT}/Drivers"/>
+                                    <listOptionValue value="${PROJECT_ROOT}/App"/>
                                     <listOptionValue value="${PROJECT_ROOT}"/>
                                     <listOptionValue value="${PROJECT_ROOT}/${ConfigName}"/>
                                     <listOptionValue value="${COM_TI_MSPM0_SDK_INSTALL_DIR}/source/third_party/CMSIS/Core/Include"/>

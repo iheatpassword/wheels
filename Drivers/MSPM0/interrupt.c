@@ -152,9 +152,9 @@ void GROUP1_IRQHandler(void)
                     break;
                 #endif
 
-                #if defined Encoder_leftB_IIDX
-                case Encoder_leftB_IIDX:
-                    encoder_leftB_isr();
+                #if defined Encoder_rightB_IIDX
+                case Encoder_rightB_IIDX:
+                    encoder_rightB_isr();
                     break;
                 #endif
 
@@ -191,9 +191,9 @@ void GROUP1_IRQHandler(void)
                     break;
                 #endif
 
-                #if defined Encoder_rightB_IIDX
-                case Encoder_rightB_IIDX:
-                    encoder_rightB_isr();
+                #if defined Encoder_leftB_IIDX
+                case Encoder_leftB_IIDX:
+                    encoder_leftB_isr();
                     break;
                 #endif
 
