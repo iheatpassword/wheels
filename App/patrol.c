@@ -2,6 +2,7 @@
 #include "motor.h"
 #include "uart.h"
 #include "gFunc.h"
+#include <math.h>
 
 /* ==================== 全局变量 ==================== */
 PatrolData_t patrol_data = {0};
@@ -23,6 +24,68 @@ static bool search_direction = true;         /* 搜索方向（true:左转, fals
 /* 惯性导航数据（预留） */
 static PatrolInertialData_t inertial_data = {0};
 static bool inertial_enabled = false;
+
+/* ==================== 状态机辅助函数 ==================== */
+
+/**
+ * @brief 安全的电机速度设置：将 float 转换为 int16_t 并限幅
+ */
+static int16_t patrol_float_to_motor_speed(float speed)
+{
+    /* 限幅到 PWM 范围 */
+    if (speed > (float)MOTOR_PWM_MAX_DUTY) {
+        speed = (float)MOTOR_PWM_MAX_DUTY;
+    } else if (speed < -(float)MOTOR_PWM_MAX_DUTY) {
+        speed = -(float)MOTOR_PWM_MAX_DUTY;
+    }
+    return (int16_t)speed;
+}
+
+/**
+ * @brief 状态切换：封装状态转换的副作用处理
+ */
+static void patrol_change_state(PatrolState_t new_state)
+{
+    /* 仅在状态变化时执行切换逻辑 */
+    if (new_state == patrol_state) return;
+    
+    patrol_state = new_state;
+    
+    /* 根据新状态重置相关计时器 */
+    switch (new_state) {
+        case PATROL_LINE:
+            pid_reset(&patrol_pid);
+            filtered_position = last_position;  /* 保持上次位置作为滤波初值 */
+            break;
+            
+        case PATROL_LOST:
+            lost_timer_ms = 0;
+            consecutive_lost_count = 0;
+            break;
+            
+        case PATROL_TURN_L:
+        case PATROL_TURN_R:
+            turn_timer_ms = 0;
+            turn_detect_count = 0;
+            break;
+            
+        case PATROL_TJUNCTION:
+            tjunction_stop_timer = 0;
+            break;
+            
+        case PATROL_SEARCH:
+            search_timer = 0;
+            search_direction = true;
+            break;
+            
+        case PATROL_STOP:
+            motor_stop_both(MOTOR_STOP_COAST);
+            break;
+            
+        default:
+            break;
+    }
+}
 
 /* ==================== 默认配置 ==================== */
 #define PATROL_DEFAULT_KP            0.8f
@@ -185,37 +248,34 @@ static void patrol_state_line(uint32_t dt_ms)
         consecutive_lost_count++;
         if (consecutive_lost_count > 3) {
             /* 连续丢线超过3次，进入丢线恢复状态 */
-            patrol_state = PATROL_LOST;
-            lost_timer_ms = 0;
-            consecutive_lost_count = 0;
             uart_printf(UART0, "Patrol: Lost line (pos=%.1f)\r\n", last_position);
+            patrol_change_state(PATROL_LOST);
         }
         return;
     }
     
     consecutive_lost_count = 0;
     
+    /* 计算转弯检测阈值（向上取整，防止 dt_ms 过大时检测立即触发） */
+    uint32_t detect_threshold = (patrol_config.turn_detect_ms + dt_ms - 1) / dt_ms;
+    
     /* 直角弯检测 */
     if (patrol_is_left_turn(&data)) {
         turn_detect_count++;
-        if (turn_detect_count >= (patrol_config.turn_detect_ms / dt_ms)) {
-            patrol_state = PATROL_TURN_L;
-            turn_timer_ms = 0;
-            turn_detect_count = 0;
+        if (turn_detect_count >= detect_threshold) {
             uart_printf(UART0, "Patrol: Left turn detected (r2=%d,r1=%d,l1=%d,l2=%d)\r\n",
                         data.r2, data.r1, data.l1, data.l2);
+            patrol_change_state(PATROL_TURN_L);
         }
         return;
     }
     
     if (patrol_is_right_turn(&data)) {
         turn_detect_count++;
-        if (turn_detect_count >= (patrol_config.turn_detect_ms / dt_ms)) {
-            patrol_state = PATROL_TURN_R;
-            turn_timer_ms = 0;
-            turn_detect_count = 0;
+        if (turn_detect_count >= detect_threshold) {
             uart_printf(UART0, "Patrol: Right turn detected (r2=%d,r1=%d,l1=%d,l2=%d)\r\n",
                         data.r2, data.r1, data.l1, data.l2);
+            patrol_change_state(PATROL_TURN_R);
         }
         return;
     }
@@ -224,9 +284,9 @@ static void patrol_state_line(uint32_t dt_ms)
     
     /* T型路口检测 */
     if (patrol_is_tjunction(&data)) {
-        patrol_state = PATROL_TJUNCTION;
         uart_printf(UART0, "Patrol: T-junction detected (r2=%d,r1=%d,l1=%d,l2=%d)\r\n",
                     data.r2, data.r1, data.l1, data.l2);
+        patrol_change_state(PATROL_TJUNCTION);
         return;
     }
     
@@ -241,14 +301,12 @@ static void patrol_state_line(uint32_t dt_ms)
     /* 电机约定：前进时左轮为负，右轮为正 */
     /* 位置 > 0（偏左）：需要右转，左电机减速（更负），右电机加速 */
     /* 位置 < 0（偏右）：需要左转，左电机加速（更接近0），右电机减速 */
-    int16_t left_speed = -(int16_t)(speed + turn);   /* 左轮取负 */
-    int16_t right_speed = (int16_t)(speed - turn);   /* 右轮保持正 */
+    float left_speed_float = -(speed + turn);   /* 左轮取负 */
+    float right_speed_float = (speed - turn);   /* 右轮保持正 */
     
-    /* 速度限幅 */
-    if (left_speed > MOTOR_PWM_MAX_DUTY) left_speed = MOTOR_PWM_MAX_DUTY;
-    if (left_speed < -MOTOR_PWM_MAX_DUTY) left_speed = -MOTOR_PWM_MAX_DUTY;
-    if (right_speed > MOTOR_PWM_MAX_DUTY) right_speed = MOTOR_PWM_MAX_DUTY;
-    if (right_speed < -MOTOR_PWM_MAX_DUTY) right_speed = -MOTOR_PWM_MAX_DUTY;
+    /* 安全类型转换并限幅 */
+    int16_t left_speed = patrol_float_to_motor_speed(left_speed_float);
+    int16_t right_speed = patrol_float_to_motor_speed(right_speed_float);
     
     motor_set_speed_both(left_speed, right_speed);
     
@@ -271,20 +329,22 @@ static void patrol_state_lost(uint32_t dt_ms)
     /* 继续沿上次方向移动，尝试找回线 */
     /* last_position > 0：偏左（r2/r1在线），说明线在左侧，向左搜索 */
     /* last_position < 0：偏右（l1/l2在线），说明线在右侧，向右搜索 */
+    int16_t search_speed = patrol_float_to_motor_speed(patrol_config.min_speed);
     if (last_position > 0) {
         /* 上次偏左，说明线在左侧，向左转向搜索 */
         /* 左转：左轮正，右轮正（原地向左转） */
-        motor_set_speed_both(patrol_config.min_speed, patrol_config.min_speed);
+        motor_set_speed_both(search_speed, search_speed);
     } else {
         /* 上次偏右，说明线在右侧，向右转向搜索 */
         /* 右转：左轮负，右轮负（原地向右转） */
-        motor_set_speed_both(-patrol_config.min_speed, -patrol_config.min_speed);
+        motor_set_speed_both(-search_speed, -search_speed);
     }
     
     /* 超时处理 */
     if (lost_timer_ms >= patrol_config.lost_timeout_ms) {
-        patrol_state = PATROL_SEARCH;
         uart_printf(UART0, "Patrol: Enter search mode (lost %dms)\r\n", lost_timer_ms);
+        patrol_change_state(PATROL_SEARCH);
+        return;
     }
     
     /* 检测是否重新找到线 */
@@ -292,9 +352,8 @@ static void patrol_state_lost(uint32_t dt_ms)
     float position = patrol_calc_position(&data);
     if (position != PATROL_POS_LOST) {
         /* 找到线，回到正常巡线 */
-        patrol_state = PATROL_LINE;
-        pid_reset(&patrol_pid);
         uart_printf(UART0, "Patrol: Line found, back to normal (pos=%.1f)\r\n", position);
+        patrol_change_state(PATROL_LINE);
     }
 }
 
@@ -317,23 +376,20 @@ static void patrol_state_turn_l(uint32_t dt_ms)
     
     /* 检测是否完成转弯（重新检测到线） */
     PatrolData_t data = patrol_read();
-    float position = patrol_calc_position(&data);
     
     /* 左转弯完成：右侧传感器（l1/l2）重新检测到线 */
     /* 说明：左转弯时，小车向左旋转，右侧传感器会先碰到新的线路 */
     if (data.l1 || data.l2) {
-        patrol_state = PATROL_LINE;
-        pid_reset(&patrol_pid);
-        turn_timer_ms = 0;
         uart_printf(UART0, "Patrol: Left turn completed (l1=%d,l2=%d)\r\n", data.l1, data.l2);
+        patrol_change_state(PATROL_LINE);
         return;
     }
     
     /* 超时保护 */
     if (turn_timer_ms > 2000) {
         /* 2秒未完成转弯，进入搜索模式 */
-        patrol_state = PATROL_SEARCH;
         uart_printf(UART0, "Patrol: Left turn timeout (%dms)\r\n", turn_timer_ms);
+        patrol_change_state(PATROL_SEARCH);
     }
 }
 
@@ -356,23 +412,20 @@ static void patrol_state_turn_r(uint32_t dt_ms)
     
     /* 检测是否完成转弯（重新检测到线） */
     PatrolData_t data = patrol_read();
-    float position = patrol_calc_position(&data);
     
     /* 右转弯完成：左侧传感器（r1/r2）重新检测到线 */
     /* 说明：右转弯时，小车向右旋转，左侧传感器会先碰到新的线路 */
     if (data.r1 || data.r2) {
-        patrol_state = PATROL_LINE;
-        pid_reset(&patrol_pid);
-        turn_timer_ms = 0;
         uart_printf(UART0, "Patrol: Right turn completed (r1=%d,r2=%d)\r\n", data.r1, data.r2);
+        patrol_change_state(PATROL_LINE);
         return;
     }
     
     /* 超时保护 */
     if (turn_timer_ms > 2000) {
         /* 2秒未完成转弯，进入搜索模式 */
-        patrol_state = PATROL_SEARCH;
         uart_printf(UART0, "Patrol: Right turn timeout (%dms)\r\n", turn_timer_ms);
+        patrol_change_state(PATROL_SEARCH);
     }
 }
 
@@ -392,14 +445,13 @@ static void patrol_state_tjunction(uint32_t dt_ms)
     if (tjunction_stop_timer < 500) {
         /* 前500ms减速前进 */
         /* 电机约定：前进时左轮为负，右轮为正 */
-        motor_set_speed_both(-patrol_config.min_speed, patrol_config.min_speed);
+        int16_t decel_speed = patrol_float_to_motor_speed(patrol_config.min_speed);
+        motor_set_speed_both(-decel_speed, decel_speed);
         uart_printf(UART0, "Patrol: T-junction decelerating (timer=%dms)\r\n", tjunction_stop_timer);
     } else {
         /* 停止 */
-        motor_stop_both(MOTOR_STOP_COAST);
-        patrol_state = PATROL_STOP;
-        tjunction_stop_timer = 0;
         uart_printf(UART0, "Patrol: T-junction, stopped\r\n");
+        patrol_change_state(PATROL_STOP);
     }
     
     /* TODO: 预留接口：根据外部指令选择转向方向 */
@@ -414,6 +466,7 @@ static void patrol_state_search(uint32_t dt_ms)
     /* 搜索模式：原地旋转寻找线 */
     
     search_timer += dt_ms;
+    int16_t search_speed = patrol_float_to_motor_speed(patrol_config.min_speed);
     
     /* 交替左右旋转搜索 */
     /* 电机约定：前进时左轮为负，右轮为正 */
@@ -422,10 +475,10 @@ static void patrol_state_search(uint32_t dt_ms)
     if (search_timer < 1000) {
         if (search_direction) {
             /* 向左搜索 */
-            motor_set_speed_both(patrol_config.min_speed, patrol_config.min_speed);
+            motor_set_speed_both(search_speed, search_speed);
         } else {
             /* 向右搜索 */
-            motor_set_speed_both(-patrol_config.min_speed, -patrol_config.min_speed);
+            motor_set_speed_both(-search_speed, -search_speed);
         }
     } else {
         search_timer = 0;
@@ -437,11 +490,9 @@ static void patrol_state_search(uint32_t dt_ms)
     PatrolData_t data = patrol_read();
     float position = patrol_calc_position(&data);
     if (position != PATROL_POS_LOST) {
-        patrol_state = PATROL_LINE;
-        pid_reset(&patrol_pid);
-        search_timer = 0;  /* 重置搜索计时器 */
-        search_direction = true;  /* 重置搜索方向 */
+        /* 找到线，回到正常巡线 */
         uart_printf(UART0, "Patrol: Line found in search mode (pos=%.1f)\r\n", position);
+        patrol_change_state(PATROL_LINE);
     }
 }
 
@@ -523,10 +574,11 @@ void patrol_set_config(PatrolConfig_t *config)
  */
 void patrol_set_speed(float speed)
 {
-    if (speed > MOTOR_PWM_MAX_DUTY) {
-        patrol_config.base_speed = MOTOR_PWM_MAX_DUTY;
-    } else if (speed < 0) {
-        patrol_config.base_speed = 0;
+    /* 限幅到有效范围 */
+    if (speed > (float)MOTOR_PWM_MAX_DUTY) {
+        patrol_config.base_speed = (float)MOTOR_PWM_MAX_DUTY;
+    } else if (speed < 0.0f) {
+        patrol_config.base_speed = 0.0f;
     } else {
         patrol_config.base_speed = speed;
     }

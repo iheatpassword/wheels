@@ -4,11 +4,14 @@
 #include "ti_msp_dl_config.h"
 #include "gFunc.h"
 
+/* PWM 配置：周期 125，最大占空比 124（整数常量，避免浮点转换） */
 #define MOTOR_PWM_PERIOD           (125U)
-#define MOTOR_PWM_MAX_DUTY         (MOTOR_PWM_PERIOD - 1U)
-#define SEVRO_PWM_PERIOD            (1800U)
-#define SEVRO_PWM_MIN_DUTY          (75U)//(45U)//angle = 0
-#define SEVRO_PWM_MAX_DUTY          (195U)//(225U)//angle = 180
+#define MOTOR_PWM_MAX_DUTY         (124U)
+
+/* 舵机 PWM 配置：周期 1800，对应角度 0~180° 的 CCR 范围 */
+#define SERVO_PWM_PERIOD            (1800U)
+#define SERVO_PWM_MIN_DUTY          (75U)   /* 0° */
+#define SERVO_PWM_MAX_DUTY          (195U)  /* 180° */
 
 typedef enum {
     MOTOR_LEFT  = 0U,

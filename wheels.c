@@ -141,9 +141,8 @@ int main(void)
 
     wait_for_mpu6050();
 
-    // motor_set_speed_both(25,-25);
-    speed_control_init(&speed_left, MOTOR_LEFT, &encoder_left_count, 
-                       0.5f, 0.1f, 0.05f);
+    /* 初始化速度闭环 PID 控制（左右电机） */
+    pid_app_init();
 
     uint32_t last_patrol_time = millis();
     uint32_t encoder_print_count = 0;
@@ -155,34 +154,37 @@ int main(void)
         /* 处理串口命令 */
         uart_cmd_process();
         
-        /* 巡线控制：10ms 中断触发，用 millis() 计算实际 dt */
+        /* 控制周期：10ms 中断触发，用 millis() 计算实际 dt */
         if (read_patrol)
         {
             uint32_t now = millis();
-            uint32_t dt = now - last_patrol_time;
+            uint32_t dt_ms = now - last_patrol_time;
             last_patrol_time = now;
             
             /* 防止首次调用或溢出时 dt 异常 */
-            if (dt == 0) dt = 1;
-            if (dt > 100) dt = 10;  /* 异常大时使用标称值 */
+            if (dt_ms == 0) dt_ms = 1;
+            if (dt_ms > 100) dt_ms = 10;  /* 异常大时使用标称值 10ms */
             
-            speed_control_update(&speed_left, dt);
+            
+            /* 速度闭环控制（根据编码器反馈调整 PWM） */
+            /* 注意：当前 patrol_line 直接设置电机速度，与 PID 闭环冲突 */
+            /* TODO: 架构优化：patrol_line 应设置目标速度，由 pid_app_update 执行 */
+            // pid_app_update(dt_ms);
             read_patrol = 0;
             
-            /* 编码器调试输出：每 100ms 打印一次，避免阻塞控制循环 */
+            /* 调试输出：每 100ms 重置计数 */
             encoder_print_count++;
             if (encoder_print_count >= 10)
             {
-                int32_t left = encoder_read_left();
-                int32_t right = encoder_read_right();
-                uart_printf(UART0, "encoder: %5d, %5d\n", left, right);
-                encoder_reset();
                 encoder_print_count = 0;
-
-                uart_printf(UART0, "mpu: %5.1f, %5.1f, %5.1f\n",pitch, roll, yaw);
-
             }
 
+        }
+        if (key_pressed(KEY_key1_PORT, KEY_key1_PIN)) {
+            motor_set_speed_both(-25, 0);
+        }
+        if (key_pressed(KEY_key2_PORT, KEY_key2_PIN)) {
+            motor_set_speed_both(0, 0);
         }
 
         // uart_printf(UART0, "pitch=%5.1f\r\n",pitch);

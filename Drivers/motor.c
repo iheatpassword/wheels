@@ -39,10 +39,10 @@ static void motor_set_dir_backward(uint8_t channel)
     }
 }
 
-static uint16_t myabs(int16_t a)
+/* 辅助函数：计算绝对值（安全类型转换） */
+static inline uint16_t motor_abs(int16_t val)
 {
-    if(a>=0) return a;
-    else return -a;
+    return (val >= 0) ? (uint16_t)val : (uint16_t)(-val);
 }
 
 /* ========== 对外接口 ========== */
@@ -147,28 +147,29 @@ void motor_standby(bool enable)
 
 void motor_test(void)
 {
-    static int16_t l_speed=0, r_speed=0;
-    static uint32_t last_time=0;
-    static int8_t step=1;
-    motor_set_speed_both(l_speed,r_speed);
-    if(millis()-last_time>=1000)
-    {
-        l_speed+=step;
-        r_speed-=step;
-        if(myabs(l_speed)>=MOTOR_PWM_MAX_DUTY||myabs(r_speed)>=MOTOR_PWM_MAX_DUTY)step=-step;
-        last_time=millis();
+    static int16_t l_speed = 0, r_speed = 0;
+    static uint32_t last_time = 0;
+    static int8_t step = 1;
+    
+    motor_set_speed_both(l_speed, r_speed);
+    if (millis() - last_time >= 1000) {
+        l_speed += step;
+        r_speed -= step;
+        if (motor_abs(l_speed) >= MOTOR_PWM_MAX_DUTY || 
+            motor_abs(r_speed) >= MOTOR_PWM_MAX_DUTY) {
+            step = -step;
+        }
+        last_time = millis();
     }
-
 }
-//ccr between 45 and 225(0 to 180)
-//recommand 75 to 195
+/* 舵机 CCR 范围：75~195 对应 0~180° */
 void servo_setting(uint16_t ccr)
 {
-    /* 限幅：防止超出舵机机械限位（0.025~0.125 占空比对应 0~180 度） */
-    if (ccr < SEVRO_PWM_MIN_DUTY) {
-        ccr = SEVRO_PWM_MIN_DUTY;
-    } else if (ccr > SEVRO_PWM_MAX_DUTY) {
-        ccr = SEVRO_PWM_MAX_DUTY;
+    /* 限幅：防止超出舵机机械限位 */
+    if (ccr < SERVO_PWM_MIN_DUTY) {
+        ccr = SERVO_PWM_MIN_DUTY;
+    } else if (ccr > SERVO_PWM_MAX_DUTY) {
+        ccr = SERVO_PWM_MAX_DUTY;
     }
 
     DL_TimerG_setCaptureCompareValue(
@@ -177,14 +178,16 @@ void servo_setting(uint16_t ccr)
 
 void servo_test(void)
 {
-    static uint16_t ccr=135;
-    static uint32_t last_time;
-    int8_t step=1;
-    if(millis()-last_time>=1000)
-    {
-        ccr+=step;
-        if(ccr>=SEVRO_PWM_MAX_DUTY||ccr<=SEVRO_PWM_MIN_DUTY)step=-step;
+    static uint16_t ccr = 135;
+    static uint32_t last_time = 0;
+    int8_t step = 1;
+    
+    if (millis() - last_time >= 1000) {
+        ccr += step;
+        if (ccr >= SERVO_PWM_MAX_DUTY || ccr <= SERVO_PWM_MIN_DUTY) {
+            step = -step;
+        }
         servo_setting(ccr);
-        last_time=millis();
+        last_time = millis();
     }
 }

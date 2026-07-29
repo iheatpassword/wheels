@@ -5,9 +5,9 @@
 volatile int32_t encoder_left_count = 0;
 volatile int32_t encoder_right_count = 0;
 
-/* 编码器状态（用于正交解码） */
-static uint8_t encoder_left_last_state = 0;
-static uint8_t encoder_right_last_state = 0;
+/* 编码器状态（用于正交解码，ISR 中使用需 volatile） */
+static volatile uint8_t encoder_left_last_state = 0;
+static volatile uint8_t encoder_right_last_state = 0;
 
 /* 正交编码器状态转换表 */
 /* 行：last_state，列：current_state */
@@ -50,7 +50,7 @@ void encoder_reset(void)
     encoder_right_count = 0;
 }
 
-static void encoder_update(volatile int32_t *count, uint8_t *last_state, 
+static void encoder_update(volatile int32_t *count, volatile uint8_t *last_state, 
                            GPIO_Regs *a_port, uint32_t a_pin, 
                            GPIO_Regs *b_port, uint32_t b_pin)
 {
@@ -59,8 +59,9 @@ static void encoder_update(volatile int32_t *count, uint8_t *last_state,
     uint8_t b = (DL_GPIO_readPins(b_port, b_pin) & b_pin) ? 0x01 : 0x00;
     uint8_t current_state = a | b;
 
-    /* 通过查找表判断方向 */
-    int8_t delta = encoder_lut[*last_state][current_state];
+    /* 通过查找表判断方向（确保 last_state 不在变化中） */
+    uint8_t prev_state = *last_state;
+    int8_t delta = encoder_lut[prev_state][current_state];
     if (delta != 0) {
         *count += delta;
     }

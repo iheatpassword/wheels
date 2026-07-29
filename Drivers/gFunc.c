@@ -2,6 +2,7 @@
 #include "motor.h"
 #include "uart.h"
 #include "clock.h"
+#include "App/pid.h"
 
 /* 10ms 中断标志，由 TIMER_0 中断设置，主循环清除 */
 volatile uint8_t read_patrol = 0;
@@ -62,6 +63,41 @@ static const char *uart_find_next_arg(const char *str)
     return str;
 }
 
+/* 字符串转浮点数（支持小数） */
+static float uart_atof(const char *str)
+{
+    float result = 0.0f;
+    float fraction = 0.1f;
+    int8_t sign = 1;
+    uint8_t has_dot = 0;
+    
+    while (*str == ' ' || *str == '\t') str++;
+    
+    if (*str == '-') {
+        sign = -1;
+        str++;
+    } else if (*str == '+') {
+        str++;
+    }
+    
+    while (*str >= '0' && *str <= '9') {
+        result = result * 10.0f + (*str - '0');
+        str++;
+    }
+    
+    if (*str == '.') {
+        has_dot = 1;
+        str++;
+        while (*str >= '0' && *str <= '9') {
+            result += (*str - '0') * fraction;
+            fraction *= 0.1f;
+            str++;
+        }
+    }
+    
+    return result * sign;
+}
+
 /* 处理电机速度命令 */
 static void uart_cmd_motor(const char *args)
 {
@@ -107,22 +143,124 @@ static void uart_cmd_servo(const char *args)
     if (angle < 0) angle = 0;
     if (angle > 180) angle = 180;
     
-    /* 将角度转换为 CCR 值 */
-    /* 0° → 45, 180° → 225 */
-    uint16_t ccr = SEVRO_PWM_MIN_DUTY + (uint16_t)((angle / 180.0f) * (SEVRO_PWM_MAX_DUTY - SEVRO_PWM_MIN_DUTY));
+    /* 将角度转换为 CCR 值（线性映射 0~180° 到 SERVO_PWM_MIN~SERVO_PWM_MAX） */
+    uint16_t ccr = SERVO_PWM_MIN_DUTY + (uint16_t)((angle / 180.0f) * (SERVO_PWM_MAX_DUTY - SERVO_PWM_MIN_DUTY));
     
     servo_setting(ccr);
     uart_printf(UART0, "Servo: angle=%d, ccr=%d\r\n", angle, ccr);
+}
+
+/* 解析通道字符为 PID_Channel_t */
+static PID_Channel_t uart_parse_channel(char ch)
+{
+    switch (ch) {
+        case 'l': case 'L': return PID_CH_LEFT;
+        case 'r': case 'R': return PID_CH_RIGHT;
+        case 'b': case 'B': return PID_CH_BOTH;
+        default: return PID_CH_BOTH;  /* 默认两边 */
+    }
+}
+
+/* 处理 PID 参数设置命令：spid <ch> <kp> <ki> <kd> */
+static void uart_cmd_spid(const char *args)
+{
+    const char *p = uart_find_next_arg(args);  /* 跳过命令名 */
+    if (*p == '\0') {
+        uart_printf(UART0, "Usage: spid <l|r|b> <kp> <ki> <kd>\r\n");
+        return;
+    }
+    
+    PID_Channel_t ch = uart_parse_channel(*p);
+    p = uart_find_next_arg(p);
+    
+    if (*p == '\0') {
+        uart_printf(UART0, "Usage: spid <l|r|b> <kp> <ki> <kd>\r\n");
+        return;
+    }
+    float kp = uart_atof(p);
+    p = uart_find_next_arg(p);
+    
+    if (*p == '\0') {
+        uart_printf(UART0, "Usage: spid <l|r|b> <kp> <ki> <kd>\r\n");
+        return;
+    }
+    float ki = uart_atof(p);
+    p = uart_find_next_arg(p);
+    
+    if (*p == '\0') {
+        uart_printf(UART0, "Usage: spid <l|r|b> <kp> <ki> <kd>\r\n");
+        return;
+    }
+    float kd = uart_atof(p);
+    
+    speed_pid_set_param(ch, kp, ki, kd);
+}
+
+/* 处理 PID 参数获取命令：gpid [ch] */
+static void uart_cmd_gpid(const char *args)
+{
+    const char *p = uart_find_next_arg(args);  /* 跳过命令名 */
+    PID_Channel_t ch = PID_CH_BOTH;  /* 默认两边 */
+    
+    if (*p != '\0') {
+        ch = uart_parse_channel(*p);
+    }
+    
+    float kp, ki, kd;
+    speed_pid_get_param(ch, &kp, &ki, &kd);
+}
+
+/* 处理目标速度设置命令：starget <ch> <speed> */
+static void uart_cmd_starget(const char *args)
+{
+    const char *p = uart_find_next_arg(args);  /* 跳过命令名 */
+    if (*p == '\0') {
+        uart_printf(UART0, "Usage: starget <l|r|b> <speed>\r\n");
+        return;
+    }
+    
+    PID_Channel_t ch = uart_parse_channel(*p);
+    p = uart_find_next_arg(p);
+    
+    if (*p == '\0') {
+        uart_printf(UART0, "Usage: starget <l|r|b> <speed>\r\n");
+        return;
+    }
+    float target = uart_atof(p);
+    
+    speed_pid_set_target(ch, target);
+}
+
+/* 处理当前速度获取命令：gspeed [ch] */
+static void uart_cmd_gspeed(const char *args)
+{
+    const char *p = uart_find_next_arg(args);  /* 跳过命令名 */
+    PID_Channel_t ch = PID_CH_BOTH;  /* 默认两边 */
+    
+    if (*p != '\0') {
+        ch = uart_parse_channel(*p);
+    }
+    
+    speed_pid_get_speed(ch);
 }
 
 /* 处理帮助命令 */
 static void uart_cmd_help(void)
 {
     uart_printf(UART0, "=== UART Debug Commands ===\r\n");
-    uart_printf(UART0, "m <left> <right>    - Set motor speed (-124~124)\r\n");
-    uart_printf(UART0, "mstop               - Stop motors\r\n");
-    uart_printf(UART0, "servo <angle>       - Set servo angle (0~180)\r\n");
-    uart_printf(UART0, "help                - Show this help\r\n");
+    uart_printf(UART0, "Motor Control:\r\n");
+    uart_printf(UART0, "  m <left> <right>   - Set motor speed (-124~124)\r\n");
+    uart_printf(UART0, "  mstop              - Stop motors\r\n");
+    uart_printf(UART0, "  servo <angle>      - Set servo angle (0~180)\r\n");
+    uart_printf(UART0, "\r\n");
+    uart_printf(UART0, "Speed Loop PID:\r\n");
+    uart_printf(UART0, "  spid <ch> <kp> <ki> <kd>  - Set speed PID params\r\n");
+    uart_printf(UART0, "  gpid [ch]                 - Get speed PID params\r\n");
+    uart_printf(UART0, "  starget <ch> <speed>      - Set target speed (cnt/s)\r\n");
+    uart_printf(UART0, "  gspeed [ch]               - Get current speed\r\n");
+    uart_printf(UART0, "\r\n");
+    uart_printf(UART0, "  ch: l=left, r=right, b=both (default)\r\n");
+    uart_printf(UART0, "  help                 - Show this help\r\n");
     uart_printf(UART0, "============================\r\n");
 }
 
@@ -141,7 +279,23 @@ void uart_cmd_process(void)
     while (*cmd == ' ' || *cmd == '\t') cmd++;
     
     /* 匹配命令 */
-    if (cmd[0] == 'm' && (cmd[1] == ' ' || cmd[1] == '\t' || cmd[1] == '\0')) {
+    if (cmd[0] == 's' && cmd[1] == 'p' && cmd[2] == 'i' && cmd[3] == 'd' &&
+        (cmd[4] == ' ' || cmd[4] == '\t' || cmd[4] == '\0')) {
+        /* spid <ch> <kp> <ki> <kd> */
+        uart_cmd_spid(cmd);
+    } else if (cmd[0] == 'g' && cmd[1] == 'p' && cmd[2] == 'i' && cmd[3] == 'd' &&
+               (cmd[4] == ' ' || cmd[4] == '\t' || cmd[4] == '\0')) {
+        /* gpid [ch] */
+        uart_cmd_gpid(cmd);
+    } else if (cmd[0] == 's' && cmd[1] == 't' && cmd[2] == 'a' && cmd[3] == 'r' && cmd[4] == 'g' &&
+               (cmd[5] == ' ' || cmd[5] == '\t' || cmd[5] == '\0')) {
+        /* starget <ch> <speed> */
+        uart_cmd_starget(cmd);
+    } else if (cmd[0] == 'g' && cmd[1] == 's' && cmd[2] == 'p' && cmd[3] == 'e' && cmd[4] == 'e' && cmd[5] == 'd' &&
+               (cmd[6] == ' ' || cmd[6] == '\t' || cmd[6] == '\0')) {
+        /* gspeed [ch] */
+        uart_cmd_gspeed(cmd);
+    } else if (cmd[0] == 'm' && (cmd[1] == ' ' || cmd[1] == '\t' || cmd[1] == '\0')) {
         if (cmd[1] == '\0') {
             uart_cmd_motor_stop();
         } else {
@@ -157,7 +311,7 @@ void uart_cmd_process(void)
               (cmd[4] == ' ' || cmd[4] == '\t' || cmd[4] == '\0')) {
         uart_cmd_help();
     } else {
-        uart_printf(UART0, "Unknown command: %s\r\n", cmd);
+        uart_printf(UART0, "Unknown command: %s (type 'help')\r\n", cmd);
     }
 }
 
