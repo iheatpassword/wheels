@@ -84,7 +84,7 @@ void speed_control_init(Speed_Control_t *sc, Motor_Channel_t channel,
     sc->last_count = *encoder;
     sc->speed = 0.0f;
 
-    /* 初始化 PID：输出范围对应 PWM 占空比 -124 ~ 124 */
+    /* 初始化 PID：输出范围对应 PWM 占空比 -399 ~ 399 */
     pid_init(&sc->pid, kp, ki, kd, -MOTOR_PWM_MAX_DUTY, MOTOR_PWM_MAX_DUTY, 1000.0f);
 }
 

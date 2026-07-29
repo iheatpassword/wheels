@@ -4,9 +4,11 @@
 #include "ti_msp_dl_config.h"
 #include "gFunc.h"
 
-/* PWM 配置：周期 125，最大占空比 124（整数常量，避免浮点转换） */
-#define MOTOR_PWM_PERIOD           (125U)
-#define MOTOR_PWM_MAX_DUTY         (124U)
+/* PWM 配置：周期 400，最大占空比 399（10kHz 控制频率）
+ * MOTOR_PWM_MAX_DUTY 不带 U 后缀，避免取反时无符号回绕导致隐式转换警告 */
+#define MOTOR_PWM_PERIOD           (400U)
+#define MOTOR_PWM_MAX_DUTY         (399)
+//注意!我将电机控制频率改为了10Khz, 400的周期!以匹配10Khz控制频率
 
 /* 舵机 PWM 配置：周期 1800，对应角度 0~180° 的 CCR 范围 */
 #define SERVO_PWM_PERIOD            (1800U)

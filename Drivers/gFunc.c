@@ -69,7 +69,6 @@ static float uart_atof(const char *str)
     float result = 0.0f;
     float fraction = 0.1f;
     int8_t sign = 1;
-    uint8_t has_dot = 0;
     
     while (*str == ' ' || *str == '\t') str++;
     
@@ -86,7 +85,6 @@ static float uart_atof(const char *str)
     }
     
     if (*str == '.') {
-        has_dot = 1;
         str++;
         while (*str >= '0' && *str <= '9') {
             result += (*str - '0') * fraction;
@@ -249,7 +247,7 @@ static void uart_cmd_help(void)
 {
     uart_printf(UART0, "=== UART Debug Commands ===\r\n");
     uart_printf(UART0, "Motor Control:\r\n");
-    uart_printf(UART0, "  m <left> <right>   - Set motor speed (-124~124)\r\n");
+    uart_printf(UART0, "  m <left> <right>   - Set motor speed (-399~399)\r\n");
     uart_printf(UART0, "  mstop              - Stop motors\r\n");
     uart_printf(UART0, "  servo <angle>      - Set servo angle (0~180)\r\n");
     uart_printf(UART0, "\r\n");

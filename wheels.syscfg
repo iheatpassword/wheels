@@ -187,10 +187,10 @@ I2C2.sclPinConfig.passedPeripheralType = scripting.forceWrite("Digital");
 I2C2.sclPinConfig.$name                = "ti_driverlib_gpio_GPIOPinGeneric18";
 
 PWM1.$name                              = "PWM_motor";
-PWM1.clockPrescale                      = 256;
-PWM1.timerCount                         = 125;
 PWM1.timerStartTimer                    = true;
 PWM1.pwmMode                            = "EDGE_ALIGN_UP";
+PWM1.timerCount                         = 400;
+PWM1.clockPrescale                      = 8;
 PWM1.peripheral.$assign                 = "TIMG0";
 PWM1.peripheral.ccp0Pin.$assign         = "PA23";
 PWM1.peripheral.ccp1Pin.$assign         = "PA13";

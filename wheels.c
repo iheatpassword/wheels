@@ -138,18 +138,21 @@ int main(void)
     OLED_Init();
 
     Interrupt_Init();
-
+    OLED_ShowString(0,0,(uint8_t *)"initing...",8);    
     wait_for_mpu6050();
 
     /* 初始化速度闭环 PID 控制（左右电机） */
     pid_app_init();
+    OLED_Clear();
+
+    motor_set_speed_both(30, -30);
 
     uint32_t last_patrol_time = millis();
     uint32_t encoder_print_count = 0;
     
     while (1) {
         led_test();
-        OLED_ShowString(0,0,(uint8_t *)"oled test",8);
+        //motor_test();
 
         /* 处理串口命令 */
         uart_cmd_process();
@@ -171,20 +174,16 @@ int main(void)
             /* TODO: 架构优化：patrol_line 应设置目标速度，由 pid_app_update 执行 */
             // pid_app_update(dt_ms);
             read_patrol = 0;
+            int32_t l=encoder_read_left()/dt_ms;
+            int32_t r=encoder_read_right()/dt_ms;
             
             /* 调试输出：每 100ms 重置计数 */
             encoder_print_count++;
             if (encoder_print_count >= 10)
             {
-                encoder_print_count = 0;
+                uart_printf(UART0, "enc: %5d, %5d\n",l, r);
             }
 
-        }
-        if (key_pressed(KEY_key1_PORT, KEY_key1_PIN)) {
-            motor_set_speed_both(-25, 0);
-        }
-        if (key_pressed(KEY_key2_PORT, KEY_key2_PIN)) {
-            motor_set_speed_both(0, 0);
         }
 
         // uart_printf(UART0, "pitch=%5.1f\r\n",pitch);

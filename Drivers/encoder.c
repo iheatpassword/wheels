@@ -36,12 +36,16 @@ void encoder_init(void)
 
 int32_t encoder_read_left(void)
 {
-    return encoder_left_count;
+    int32_t temp=encoder_left_count;
+    encoder_left_count=0;
+    return temp;
 }
 
 int32_t encoder_read_right(void)
 {
-    return encoder_right_count;
+    int32_t temp=encoder_right_count;
+    encoder_right_count=0;
+    return temp;
 }
 
 void encoder_reset(void)
