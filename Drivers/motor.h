@@ -10,11 +10,6 @@
 #define MOTOR_PWM_MAX_DUTY         (399)
 //注意!我将电机控制频率改为了10Khz, 400的周期!以匹配10Khz控制频率
 
-/* 舵机 PWM 配置：周期 1800，对应角度 0~180° 的 CCR 范围 */
-#define SERVO_PWM_PERIOD            (1800U)
-#define SERVO_PWM_MIN_DUTY          (75U)   /* 0° */
-#define SERVO_PWM_MAX_DUTY          (195U)  /* 180° */
-
 typedef enum {
     MOTOR_LEFT  = 0U,
     MOTOR_RIGHT = 1U
@@ -34,7 +29,5 @@ void motor_brake(Motor_Channel_t channel);
 void motor_brake_both(void);
 void motor_standby(bool enable);
 void motor_test(void);
-void servo_setting(uint16_t ccr);
-void servo_test(void);
 
 #endif

@@ -149,7 +149,7 @@ void motor_test(void)
 {
     static int16_t l_speed = 0, r_speed = 0;
     static uint32_t last_time = 0;
-    static int8_t step = 1;
+    static int8_t step = 20;
     
     motor_set_speed_both(l_speed, r_speed);
     if (millis() - last_time >= 1000) {
@@ -159,35 +159,6 @@ void motor_test(void)
             motor_abs(r_speed) >= MOTOR_PWM_MAX_DUTY) {
             step = -step;
         }
-        last_time = millis();
-    }
-}
-/* 舵机 CCR 范围：75~195 对应 0~180° */
-void servo_setting(uint16_t ccr)
-{
-    /* 限幅：防止超出舵机机械限位 */
-    if (ccr < SERVO_PWM_MIN_DUTY) {
-        ccr = SERVO_PWM_MIN_DUTY;
-    } else if (ccr > SERVO_PWM_MAX_DUTY) {
-        ccr = SERVO_PWM_MAX_DUTY;
-    }
-
-    DL_TimerG_setCaptureCompareValue(
-        PWM_servo_INST, ccr, DL_TIMER_CC_0_INDEX);
-}
-
-void servo_test(void)
-{
-    static uint16_t ccr = 135;
-    static uint32_t last_time = 0;
-    int8_t step = 1;
-    
-    if (millis() - last_time >= 1000) {
-        ccr += step;
-        if (ccr >= SERVO_PWM_MAX_DUTY || ccr <= SERVO_PWM_MIN_DUTY) {
-            step = -step;
-        }
-        servo_setting(ccr);
         last_time = millis();
     }
 }

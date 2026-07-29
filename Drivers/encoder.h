@@ -9,6 +9,7 @@ void encoder_init(void);
 int32_t encoder_read_left(void);
 int32_t encoder_read_right(void);
 void encoder_reset(void);
+void encoder_get_speed(int32_t *left_speed, int32_t *right_speed);
 
 void encoder_leftA_isr(void);
 void encoder_leftB_isr(void);

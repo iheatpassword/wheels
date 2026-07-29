@@ -73,15 +73,14 @@ void patrol_test(void)
         DL_GPIO_clearPins(LED_PORT, LED_led0_PIN);
     }
 }
-// expect phenomenon: led1 blink at 1 sec intervals, you can see phenomenon after 1 sec of loading
+// expect phenomenon: led0 blink at 1 sec intervals
 void led_test(void)
 {
     const uint16_t delayTime=1000;
     static uint32_t last_time=0;
     if(millis()-last_time>delayTime)
     {
-       //DL_GPIO_togglePins(LED_PORT, LED_led0_PIN);
-       DL_GPIO_togglePins(LED_PORT, LED_led1_PIN);
+       DL_GPIO_togglePins(LED_PORT, LED_led0_PIN);
        last_time=millis();
     }
 }
@@ -98,14 +97,6 @@ void beeper_test(void)
        DL_GPIO_clearPins(Beeper_PORT, Beeper_PIN_0_PIN);
        last_time=millis();
     }
-}
-void beeper_on(void)
-{
-    DL_GPIO_setPins(Beeper_PORT, Beeper_PIN_0_PIN);
-}
-void beeper_off(void)
-{
-    DL_GPIO_clearPins(Beeper_PORT, Beeper_PIN_0_PIN);
 }
 void beeper_blink(void)
 {
@@ -145,43 +136,32 @@ int main(void)
     pid_app_init();
     OLED_Clear();
 
-    motor_set_speed_both(30, -30);
+    // motor_set_speed_both(-20, 90);
 
-    uint32_t last_patrol_time = millis();
     uint32_t encoder_print_count = 0;
     
     while (1) {
         led_test();
-        //motor_test();
+        // motor_test();
 
         /* 处理串口命令 */
         uart_cmd_process();
         
-        /* 控制周期：10ms 中断触发，用 millis() 计算实际 dt */
+        /* 控制周期：10ms 中断触发 */
         if (read_patrol)
         {
-            uint32_t now = millis();
-            uint32_t dt_ms = now - last_patrol_time;
-            last_patrol_time = now;
-            
-            /* 防止首次调用或溢出时 dt 异常 */
-            if (dt_ms == 0) dt_ms = 1;
-            if (dt_ms > 100) dt_ms = 10;  /* 异常大时使用标称值 10ms */
-            
-            
-            /* 速度闭环控制（根据编码器反馈调整 PWM） */
-            /* 注意：当前 patrol_line 直接设置电机速度，与 PID 闭环冲突 */
-            /* TODO: 架构优化：patrol_line 应设置目标速度，由 pid_app_update 执行 */
-            // pid_app_update(dt_ms);
             read_patrol = 0;
-            int32_t l=encoder_read_left()/dt_ms;
-            int32_t r=encoder_read_right()/dt_ms;
             
-            /* 调试输出：每 100ms 重置计数 */
+            /* 读取编码器速度 (counts/s) */
+            int32_t l_speed, r_speed;
+            encoder_get_speed(&l_speed, &r_speed);
+            
+            /* 调试输出：每 100ms 输出一次 */
             encoder_print_count++;
             if (encoder_print_count >= 10)
             {
-                uart_printf(UART0, "enc: %5d, %5d\n",l, r);
+                uart_printf(UART0, "enc: %6d, %6d\n",l_speed, r_speed);
+                encoder_print_count=0;
             }
 
         }

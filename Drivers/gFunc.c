@@ -126,27 +126,6 @@ static void uart_cmd_motor_stop(void)
     uart_printf(UART0, "Motor stopped\r\n");
 }
 
-/* 处理舵机角度命令 */
-static void uart_cmd_servo(const char *args)
-{
-    const char *p = uart_find_next_arg(args);  /* 跳过命令名 */
-    if (*p == '\0') {
-        uart_printf(UART0, "Usage: servo <angle> (0-180)\r\n");
-        return;
-    }
-    
-    int32_t angle = uart_atoi(p);
-    
-    /* 角度范围限制 */
-    if (angle < 0) angle = 0;
-    if (angle > 180) angle = 180;
-    
-    /* 将角度转换为 CCR 值（线性映射 0~180° 到 SERVO_PWM_MIN~SERVO_PWM_MAX） */
-    uint16_t ccr = SERVO_PWM_MIN_DUTY + (uint16_t)((angle / 180.0f) * (SERVO_PWM_MAX_DUTY - SERVO_PWM_MIN_DUTY));
-    
-    servo_setting(ccr);
-    uart_printf(UART0, "Servo: angle=%d, ccr=%d\r\n", angle, ccr);
-}
 
 /* 解析通道字符为 PID_Channel_t */
 static PID_Channel_t uart_parse_channel(char ch)
@@ -249,7 +228,6 @@ static void uart_cmd_help(void)
     uart_printf(UART0, "Motor Control:\r\n");
     uart_printf(UART0, "  m <left> <right>   - Set motor speed (-399~399)\r\n");
     uart_printf(UART0, "  mstop              - Stop motors\r\n");
-    uart_printf(UART0, "  servo <angle>      - Set servo angle (0~180)\r\n");
     uart_printf(UART0, "\r\n");
     uart_printf(UART0, "Speed Loop PID:\r\n");
     uart_printf(UART0, "  spid <ch> <kp> <ki> <kd>  - Set speed PID params\r\n");
@@ -302,9 +280,6 @@ void uart_cmd_process(void)
     } else if (cmd[0] == 'm' && cmd[1] == 's' && cmd[2] == 't' && cmd[3] == 'o' && cmd[4] == 'p' && 
               (cmd[5] == ' ' || cmd[5] == '\t' || cmd[5] == '\0')) {
         uart_cmd_motor_stop();
-    } else if (cmd[0] == 's' && cmd[1] == 'e' && cmd[2] == 'r' && cmd[3] == 'v' && cmd[4] == 'o' && 
-              (cmd[5] == ' ' || cmd[5] == '\t' || cmd[5] == '\0')) {
-        uart_cmd_servo(cmd);
     } else if (cmd[0] == 'h' && cmd[1] == 'e' && cmd[2] == 'l' && cmd[3] == 'p' && 
               (cmd[4] == ' ' || cmd[4] == '\t' || cmd[4] == '\0')) {
         uart_cmd_help();

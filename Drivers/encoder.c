@@ -1,5 +1,6 @@
 #include "encoder.h"
 #include "interrupt.h"
+#include "gFunc.h"
 
 /* 编码器计数值 */
 volatile int32_t encoder_left_count = 0;
@@ -52,6 +53,44 @@ void encoder_reset(void)
 {
     encoder_left_count = 0;
     encoder_right_count = 0;
+}
+
+void encoder_get_speed(int32_t *left_speed, int32_t *right_speed)
+{
+    static uint32_t last_time = 0;
+    static int32_t last_left_speed = 0;
+    static int32_t last_right_speed = 0;
+    
+    uint32_t now = millis();
+    int32_t dt_ms;  /* 改为 int32_t 避免与有符号 l_delta 运算时的隐式无符号转换 */
+    
+    if (last_time == 0) {
+        /* 首次调用，跳过首次，返回0 */
+        last_time = now;
+        *left_speed = 0;
+        *right_speed = 0;
+        return;
+    }
+    
+    dt_ms = (int32_t)(now - last_time);
+    last_time = now;
+    
+    if (dt_ms <= 0) {
+        *left_speed = last_left_speed;
+        *right_speed = last_right_speed;
+        return;
+    }
+    
+    int32_t l_delta = encoder_read_left();
+    int32_t r_delta = encoder_read_right();
+    
+    /* 计算速度：counts per second */
+    /* 先乘后除，避免整数除法丢失精度 */
+    last_left_speed = (l_delta * 1000) / dt_ms;
+    last_right_speed = (r_delta * 1000) / dt_ms;
+    
+    *left_speed = -last_left_speed;
+    *right_speed = -last_right_speed;
 }
 
 static void encoder_update(volatile int32_t *count, volatile uint8_t *last_state, 
