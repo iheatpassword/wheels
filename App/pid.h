@@ -32,7 +32,8 @@ typedef struct {
     Motor_Channel_t motor_channel;
     volatile int32_t *encoder_count;
     int32_t last_count;
-    float speed;  /* 当前速度（脉冲/秒） */
+    float speed;       /* 当前速度（脉冲/秒） */
+    float polarity;    /* 编码器极性：+1.0 或 -1.0，用于对齐编码器与电机方向 */
 } Speed_Control_t;
 
 /* 全局速度控制器实例 */
@@ -58,6 +59,60 @@ void speed_pid_set_param(PID_Channel_t channel, float kp, float ki, float kd);
 void speed_pid_get_param(PID_Channel_t channel, float *kp, float *ki, float *kd);
 void speed_pid_set_target(PID_Channel_t channel, float target_speed);
 float speed_pid_get_speed(PID_Channel_t channel);
+
+/* 单独调整参数接口 */
+void speed_pid_set_kp(PID_Channel_t channel, float kp);
+void speed_pid_set_ki(PID_Channel_t channel, float ki);
+void speed_pid_set_kd(PID_Channel_t channel, float kd);
+
+/* 获取 PID 内部原始速度（调参用，确保与 PID 反馈一致） */
+void speed_pid_get_raw_speed(float *left_speed, float *right_speed);
+
+/* ================ 转向环（航向控制） ================ */
+
+/* 转向控制结构体：通过航向角（yaw）闭环控制转向，差速输出到左右轮 */
+typedef struct {
+    PID_Controller_t pid;       /* 转向 PID */
+    float target_yaw;           /* 目标航向角（度） */
+    float current_yaw;          /* 当前航向角（度） */
+    float turn_output;          /* 转向输出量（脉冲/秒，差速补偿） */
+    float base_speed;           /* 基础前进速度（脉冲/秒，0=原地转向） */
+    float max_turn_output;      /* 最大转向输出限幅（脉冲/秒） */
+} Steer_Control_t;
+
+extern Steer_Control_t steer_control;
+
+/* 初始化转向环
+ * kp, ki, kd: 航向环 PID 参数（kp 单位：脉冲/秒 每度）
+ * max_turn: 最大转向差速（脉冲/秒） */
+void steer_pid_init(float kp, float ki, float kd, float max_turn);
+
+/* 设置目标航向角（度） */
+void steer_pid_set_target_yaw(float yaw_deg);
+
+/* 设置基础前进速度（脉冲/秒，0=原地转向） */
+void steer_pid_set_base_speed(float base_speed_counts);
+
+/* 重置当前航向为 0 度（校正基准） */
+void steer_pid_reset_yaw_zero(float current_yaw_deg);
+
+/* 手动增加/减少目标航向角（度），用于微调转向 */
+void steer_pid_adjust_yaw(float delta_deg);
+
+/* 更新转向环（10ms 调用），内部计算差速并设置左右轮目标
+ * current_yaw_deg: 当前 MPU6050 航向角
+ * dt_ms: 控制周期（毫秒） */
+void steer_pid_update(float current_yaw_deg, uint32_t dt_ms);
+
+/* 停止转向控制，左右轮目标速度置 0 */
+void steer_pid_stop(void);
+
+/* 调参接口：单独设置转向环参数 */
+void steer_pid_set_kp(float kp);
+void steer_pid_set_ki(float ki);
+void steer_pid_set_kd(float kd);
+void steer_pid_set_param(float kp, float ki, float kd);
+void steer_pid_get_param(float *kp, float *ki, float *kd);
 
 /* 应用层初始化 */
 void pid_app_init(void);

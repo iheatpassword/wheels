@@ -173,6 +173,66 @@ static void uart_cmd_spid(const char *args)
     speed_pid_set_param(ch, kp, ki, kd);
 }
 
+/* 处理单独设置 kp 命令：skp <ch> <value> */
+static void uart_cmd_skp(const char *args)
+{
+    const char *p = uart_find_next_arg(args);
+    if (*p == '\0') {
+        uart_printf(UART0, "Usage: skp <l|r|b> <kp>\r\n");
+        return;
+    }
+    
+    PID_Channel_t ch = uart_parse_channel(*p);
+    p = uart_find_next_arg(p);
+    
+    if (*p == '\0') {
+        uart_printf(UART0, "Usage: skp <l|r|b> <kp>\r\n");
+        return;
+    }
+    float kp = uart_atof(p);
+    speed_pid_set_kp(ch, kp);
+}
+
+/* 处理单独设置 ki 命令：ski <ch> <value> */
+static void uart_cmd_ski(const char *args)
+{
+    const char *p = uart_find_next_arg(args);
+    if (*p == '\0') {
+        uart_printf(UART0, "Usage: ski <l|r|b> <ki>\r\n");
+        return;
+    }
+    
+    PID_Channel_t ch = uart_parse_channel(*p);
+    p = uart_find_next_arg(p);
+    
+    if (*p == '\0') {
+        uart_printf(UART0, "Usage: ski <l|r|b> <ki>\r\n");
+        return;
+    }
+    float ki = uart_atof(p);
+    speed_pid_set_ki(ch, ki);
+}
+
+/* 处理单独设置 kd 命令：skd <ch> <value> */
+static void uart_cmd_skd(const char *args)
+{
+    const char *p = uart_find_next_arg(args);
+    if (*p == '\0') {
+        uart_printf(UART0, "Usage: skd <l|r|b> <kd>\r\n");
+        return;
+    }
+    
+    PID_Channel_t ch = uart_parse_channel(*p);
+    p = uart_find_next_arg(p);
+    
+    if (*p == '\0') {
+        uart_printf(UART0, "Usage: skd <l|r|b> <kd>\r\n");
+        return;
+    }
+    float kd = uart_atof(p);
+    speed_pid_set_kd(ch, kd);
+}
+
 /* 处理 PID 参数获取命令：gpid [ch] */
 static void uart_cmd_gpid(const char *args)
 {
@@ -221,6 +281,105 @@ static void uart_cmd_gspeed(const char *args)
     speed_pid_get_speed(ch);
 }
 
+/* ==================== 转向环命令 ==================== */
+
+/* 设置转向环全部参数：stpid <kp> <ki> <kd> */
+static void uart_cmd_stpid(const char *args)
+{
+    const char *p = uart_find_next_arg(args);
+    float kp = uart_atof(p);   p = uart_find_next_arg(p);
+    float ki = uart_atof(p);   p = uart_find_next_arg(p);
+    float kd = uart_atof(p);
+
+    if (kp == 0.0f && ki == 0.0f && kd == 0.0f) {
+        /* 容错：若第一个数解析为 0 且后面没内容，提示用法 */
+        const char *q = uart_find_next_arg(args);
+        if (*q == '\0') {
+            uart_printf(UART0, "Usage: stpid <kp> <ki> <kd>\r\n");
+            return;
+        }
+    }
+    steer_pid_set_param(kp, ki, kd);
+}
+
+/* 单独设置转向环参数：stkp / stki / stkd <value> */
+static void uart_cmd_stkp(const char *args)
+{
+    const char *p = uart_find_next_arg(args);
+    if (*p == '\0') { uart_printf(UART0, "Usage: stkp <kp>\r\n"); return; }
+    steer_pid_set_kp(uart_atof(p));
+}
+
+static void uart_cmd_stki(const char *args)
+{
+    const char *p = uart_find_next_arg(args);
+    if (*p == '\0') { uart_printf(UART0, "Usage: stki <ki>\r\n"); return; }
+    steer_pid_set_ki(uart_atof(p));
+}
+
+static void uart_cmd_stkd(const char *args)
+{
+    const char *p = uart_find_next_arg(args);
+    if (*p == '\0') { uart_printf(UART0, "Usage: stkd <kd>\r\n"); return; }
+    steer_pid_set_kd(uart_atof(p));
+}
+
+/* 获取转向环参数：gtpid */
+static void uart_cmd_gtpid(const char *args)
+{
+    (void)args;
+    float kp, ki, kd;
+    steer_pid_get_param(&kp, &ki, &kd);
+}
+
+/* 设置目标航向角：syaw <degrees> */
+static void uart_cmd_syaw(const char *args)
+{
+    const char *p = uart_find_next_arg(args);
+    if (*p == '\0') { uart_printf(UART0, "Usage: syaw <degrees>\r\n"); return; }
+    float yaw = uart_atof(p);
+    steer_pid_set_target_yaw(yaw);
+    uart_printf(UART0, "OK steer target_yaw=%5.1fdeg\r\n", yaw);
+}
+
+/* 微调目标航向角：yadj <delta_degrees>（正数右转，负数左转） */
+static void uart_cmd_yadj(const char *args)
+{
+    const char *p = uart_find_next_arg(args);
+    if (*p == '\0') { uart_printf(UART0, "Usage: yadj <delta_degrees>\r\n"); return; }
+    float delta = uart_atof(p);
+    steer_pid_adjust_yaw(delta);
+    uart_printf(UART0, "OK steer adjust %+5.1fdeg  now target=%5.1fdeg\r\n",
+                delta, steer_control.target_yaw);
+}
+
+/* 设置基础前进速度：sbase <counts/s>（0=原地转向） */
+static void uart_cmd_sbase(const char *args)
+{
+    const char *p = uart_find_next_arg(args);
+    if (*p == '\0') { uart_printf(UART0, "Usage: sbase <counts_per_sec>\r\n"); return; }
+    float spd = uart_atof(p);
+    steer_pid_set_base_speed(spd);
+    uart_printf(UART0, "OK steer base_speed=%5.1f cnt/s\r\n", spd);
+}
+
+/* 重置当前航向为 0 度基准：yaw0 */
+static void uart_cmd_yaw0(const char *args)
+{
+    (void)args;
+    extern float yaw;
+    steer_pid_reset_yaw_zero(yaw);
+    uart_printf(UART0, "OK steer yaw reset: current=%5.1fdeg set to 0 baseline\r\n", yaw);
+}
+
+/* 停止转向控制：sstop（同时停止转向环和速度环） */
+static void uart_cmd_sstop(const char *args)
+{
+    (void)args;
+    steer_pid_stop();
+    uart_printf(UART0, "OK steer + speed stopped\r\n");
+}
+
 /* 处理帮助命令 */
 static void uart_cmd_help(void)
 {
@@ -230,10 +389,25 @@ static void uart_cmd_help(void)
     uart_printf(UART0, "  mstop              - Stop motors\r\n");
     uart_printf(UART0, "\r\n");
     uart_printf(UART0, "Speed Loop PID:\r\n");
-    uart_printf(UART0, "  spid <ch> <kp> <ki> <kd>  - Set speed PID params\r\n");
+    uart_printf(UART0, "  spid <ch> <kp> <ki> <kd>  - Set all PID params\r\n");
+    uart_printf(UART0, "  skp <ch> <kp>             - Set kp only\r\n");
+    uart_printf(UART0, "  ski <ch> <ki>             - Set ki only\r\n");
+    uart_printf(UART0, "  skd <ch> <kd>             - Set kd only\r\n");
     uart_printf(UART0, "  gpid [ch]                 - Get speed PID params\r\n");
     uart_printf(UART0, "  starget <ch> <speed>      - Set target speed (cnt/s)\r\n");
     uart_printf(UART0, "  gspeed [ch]               - Get current speed\r\n");
+    uart_printf(UART0, "\r\n");
+    uart_printf(UART0, "Steer / Yaw PID (Heading Loop):\r\n");
+    uart_printf(UART0, "  stpid <kp> <ki> <kd>      - Set steer PID params\r\n");
+    uart_printf(UART0, "  stkp <kp>                 - Set steer kp\r\n");
+    uart_printf(UART0, "  stki <ki>                 - Set steer ki\r\n");
+    uart_printf(UART0, "  stkd <kd>                 - Set steer kd\r\n");
+    uart_printf(UART0, "  gtpid                     - Get steer PID params\r\n");
+    uart_printf(UART0, "  syaw <deg>                - Set target heading (deg)\r\n");
+    uart_printf(UART0, "  yadj <deg>                - Adjust heading +/-deg (pos=turn right)\r\n");
+    uart_printf(UART0, "  yaw0                      - Reset current yaw to 0 baseline\r\n");
+    uart_printf(UART0, "  sbase <cnt/s>             - Set base forward speed (0=in-place turn)\r\n");
+    uart_printf(UART0, "  sstop                     - Stop steer + speed loop\r\n");
     uart_printf(UART0, "\r\n");
     uart_printf(UART0, "  ch: l=left, r=right, b=both (default)\r\n");
     uart_printf(UART0, "  help                 - Show this help\r\n");
@@ -251,6 +425,9 @@ void uart_cmd_process(void)
     /* 命令缓冲区现在是安全的，可以读取 */
     const char *cmd = uart_cmd_buffer;
     
+    /* 重置缓冲区长度，准备接收下一条命令 */
+    uart_cmd_buffer_len = 0;
+    
     /* 跳过前导空白 */
     while (*cmd == ' ' || *cmd == '\t') cmd++;
     
@@ -259,18 +436,71 @@ void uart_cmd_process(void)
         (cmd[4] == ' ' || cmd[4] == '\t' || cmd[4] == '\0')) {
         /* spid <ch> <kp> <ki> <kd> */
         uart_cmd_spid(cmd);
+    } else if (cmd[0] == 's' && cmd[1] == 'k' && cmd[2] == 'p' &&
+               (cmd[3] == ' ' || cmd[3] == '\t' || cmd[3] == '\0')) {
+        /* skp <ch> <kp> */
+        uart_cmd_skp(cmd);
+    } else if (cmd[0] == 's' && cmd[1] == 'k' && cmd[2] == 'i' &&
+               (cmd[3] == ' ' || cmd[3] == '\t' || cmd[3] == '\0')) {
+        /* ski <ch> <ki> */
+        uart_cmd_ski(cmd);
+    } else if (cmd[0] == 's' && cmd[1] == 'k' && cmd[2] == 'd' &&
+               (cmd[3] == ' ' || cmd[3] == '\t' || cmd[3] == '\0')) {
+        /* skd <ch> <kd> */
+        uart_cmd_skd(cmd);
     } else if (cmd[0] == 'g' && cmd[1] == 'p' && cmd[2] == 'i' && cmd[3] == 'd' &&
                (cmd[4] == ' ' || cmd[4] == '\t' || cmd[4] == '\0')) {
         /* gpid [ch] */
         uart_cmd_gpid(cmd);
-    } else if (cmd[0] == 's' && cmd[1] == 't' && cmd[2] == 'a' && cmd[3] == 'r' && cmd[4] == 'g' &&
-               (cmd[5] == ' ' || cmd[5] == '\t' || cmd[5] == '\0')) {
+    } else if (cmd[0] == 's' && cmd[1] == 't' && cmd[2] == 'a' && cmd[3] == 'r' && 
+               cmd[4] == 'g' && cmd[5] == 'e' && cmd[6] == 't' &&
+               (cmd[7] == ' ' || cmd[7] == '\t' || cmd[7] == '\0')) {
         /* starget <ch> <speed> */
         uart_cmd_starget(cmd);
     } else if (cmd[0] == 'g' && cmd[1] == 's' && cmd[2] == 'p' && cmd[3] == 'e' && cmd[4] == 'e' && cmd[5] == 'd' &&
                (cmd[6] == ' ' || cmd[6] == '\t' || cmd[6] == '\0')) {
         /* gspeed [ch] */
         uart_cmd_gspeed(cmd);
+    } else if (cmd[0] == 's' && cmd[1] == 't' && cmd[2] == 'p' && cmd[3] == 'i' && cmd[4] == 'd' &&
+               (cmd[5] == ' ' || cmd[5] == '\t' || cmd[5] == '\0')) {
+        /* stpid <kp> <ki> <kd> */
+        uart_cmd_stpid(cmd);
+    } else if (cmd[0] == 's' && cmd[1] == 't' && cmd[2] == 'k' && cmd[3] == 'p' &&
+               (cmd[4] == ' ' || cmd[4] == '\t' || cmd[4] == '\0')) {
+        /* stkp <kp> */
+        uart_cmd_stkp(cmd);
+    } else if (cmd[0] == 's' && cmd[1] == 't' && cmd[2] == 'k' && cmd[3] == 'i' &&
+               (cmd[4] == ' ' || cmd[4] == '\t' || cmd[4] == '\0')) {
+        /* stki <ki> */
+        uart_cmd_stki(cmd);
+    } else if (cmd[0] == 's' && cmd[1] == 't' && cmd[2] == 'k' && cmd[3] == 'd' &&
+               (cmd[4] == ' ' || cmd[4] == '\t' || cmd[4] == '\0')) {
+        /* stkd <kd> */
+        uart_cmd_stkd(cmd);
+    } else if (cmd[0] == 'g' && cmd[1] == 't' && cmd[2] == 'p' && cmd[3] == 'i' && cmd[4] == 'd' &&
+               (cmd[5] == ' ' || cmd[5] == '\t' || cmd[5] == '\0')) {
+        /* gtpid */
+        uart_cmd_gtpid(cmd);
+    } else if (cmd[0] == 's' && cmd[1] == 'y' && cmd[2] == 'a' && cmd[3] == 'w' &&
+               (cmd[4] == ' ' || cmd[4] == '\t' || cmd[4] == '\0')) {
+        /* syaw <deg> */
+        uart_cmd_syaw(cmd);
+    } else if (cmd[0] == 'y' && cmd[1] == 'a' && cmd[2] == 'd' && cmd[3] == 'j' &&
+               (cmd[4] == ' ' || cmd[4] == '\t' || cmd[4] == '\0')) {
+        /* yadj <deg> */
+        uart_cmd_yadj(cmd);
+    } else if (cmd[0] == 'y' && cmd[1] == 'a' && cmd[2] == 'w' && cmd[3] == '0' &&
+               (cmd[4] == ' ' || cmd[4] == '\t' || cmd[4] == '\0')) {
+        /* yaw0 */
+        uart_cmd_yaw0(cmd);
+    } else if (cmd[0] == 's' && cmd[1] == 'b' && cmd[2] == 'a' && cmd[3] == 's' && cmd[4] == 'e' &&
+               (cmd[5] == ' ' || cmd[5] == '\t' || cmd[5] == '\0')) {
+        /* sbase <cnt/s> */
+        uart_cmd_sbase(cmd);
+    } else if (cmd[0] == 's' && cmd[1] == 's' && cmd[2] == 't' && cmd[3] == 'o' && cmd[4] == 'p' &&
+               (cmd[5] == ' ' || cmd[5] == '\t' || cmd[5] == '\0')) {
+        /* sstop */
+        uart_cmd_sstop(cmd);
     } else if (cmd[0] == 'm' && (cmd[1] == ' ' || cmd[1] == '\t' || cmd[1] == '\0')) {
         if (cmd[1] == '\0') {
             uart_cmd_motor_stop();
@@ -299,8 +529,8 @@ void UART_0_INST_IRQHandler(void)
             
             data = DL_UART_Main_receiveData(UART_0_INST);
             
-            /* 回显 */
-            DL_UART_Main_transmitData(UART_0_INST, data);
+            // /* 回显 */
+            // DL_UART_Main_transmitData(UART_0_INST, data);
             
             /* 如果命令尚未处理，丢弃新字符 */
             if (uart_cmd_ready) {
@@ -309,12 +539,13 @@ void UART_0_INST_IRQHandler(void)
             
             /* 处理命令 */
             if (data == '\r' || data == '\n') {
-                /* 命令结束 */
+                /* 命令结束：仅当缓冲区有内容时才触发命令就绪 */
                 if (uart_cmd_buffer_len > 0) {
                     uart_cmd_buffer[uart_cmd_buffer_len] = '\0';
                     uart_cmd_ready = 1;
+                    /* 保留 uart_cmd_buffer_len 不变，主循环处理后再清空 */
                 }
-                uart_cmd_buffer_len = 0;
+                /* 空行（连续 \r\n）直接忽略，不设置就绪标志 */
             } else if (data == '\b' || data == 0x7F) {
                 /* 退格 */
                 if (uart_cmd_buffer_len > 0) {

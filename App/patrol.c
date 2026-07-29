@@ -248,7 +248,7 @@ static void patrol_state_line(uint32_t dt_ms)
         consecutive_lost_count++;
         if (consecutive_lost_count > 3) {
             /* 连续丢线超过3次，进入丢线恢复状态 */
-            uart_printf(UART0, "Patrol: Lost line (pos=%.1f)\r\n", last_position);
+            uart_printf(UART0, "Patrol: Lost line (pos=%5.1f)\r\n", last_position);
             patrol_change_state(PATROL_LOST);
         }
         return;
@@ -352,7 +352,7 @@ static void patrol_state_lost(uint32_t dt_ms)
     float position = patrol_calc_position(&data);
     if (position != PATROL_POS_LOST) {
         /* 找到线，回到正常巡线 */
-        uart_printf(UART0, "Patrol: Line found, back to normal (pos=%.1f)\r\n", position);
+        uart_printf(UART0, "Patrol: Line found, back to normal (pos=%5.1f)\r\n", position);
         patrol_change_state(PATROL_LINE);
     }
 }
@@ -491,7 +491,7 @@ static void patrol_state_search(uint32_t dt_ms)
     float position = patrol_calc_position(&data);
     if (position != PATROL_POS_LOST) {
         /* 找到线，回到正常巡线 */
-        uart_printf(UART0, "Patrol: Line found in search mode (pos=%.1f)\r\n", position);
+        uart_printf(UART0, "Patrol: Line found in search mode (pos=%5.1f)\r\n", position);
         patrol_change_state(PATROL_LINE);
     }
 }

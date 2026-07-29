@@ -44,18 +44,6 @@
 #include "mpu6050.h"
 #include "oled_hardware_i2c.h"
 
-void timer_test(void)
-{
-    static uint8_t i=0;
-    //static uint32_t last_time=0;
-    if(millis()%1000==0)//print every 1s
-    {
-        i++;
-        uart_printf(UART0, "i=%d\r\n", i);
-        uart_printf(UART0, "millis=%d\r\n",millis());
-        //last_time=millis();
-    }
-}
 // expect phenomenon: if four-way patrol not detect black, led0 on
 void patrol_test(void)
 {
@@ -136,7 +124,12 @@ int main(void)
     pid_app_init();
     OLED_Clear();
 
-    // motor_set_speed_both(-20, 90);
+    /* 初始化航向：以通电时 MPU6050 的 yaw 为 0 度基准
+     * 注意：MPU6050_Init + wait_for_mpu6050 后 yaw 已可读取；
+     *       若航向角漂移较大，可随时通过串口命令 yaw0 重置基准 */
+    extern float yaw;
+    Read_Quad();  /* 先触发一次读取，确保 yaw 更新 */
+    steer_pid_reset_yaw_zero(yaw);
 
     uint32_t encoder_print_count = 0;
     
@@ -151,25 +144,31 @@ int main(void)
         if (read_patrol)
         {
             read_patrol = 0;
-            
-            /* 读取编码器速度 (counts/s) */
-            int32_t l_speed, r_speed;
-            encoder_get_speed(&l_speed, &r_speed);
+
+            /* 读取 MPU6050 航向角（DMP 每 10ms 读取一次） */
+            Read_Quad();
+
+            /* 1) 转向环：根据 yaw 误差，输出差速补偿
+             *    steer_pid_update 内部会调用 speed_control_set 设置左右轮目标速度 */
+            steer_pid_update(yaw, 10);
+
+            /* 2) 速度环：根据目标速度，驱动 PWM 输出
+             *    注意：steer_pid_update 已经写好了左右轮 setpoint，
+             *    pid_app_update 只是驱动速度闭环执行 PWM 更新 */
+            pid_app_update(10);
             
             /* 调试输出：每 100ms 输出一次 */
             encoder_print_count++;
             if (encoder_print_count >= 10)
             {
-                uart_printf(UART0, "enc: %6d, %6d\n",l_speed, r_speed);
-                encoder_print_count=0;
+                float l_speed, r_speed;
+                speed_pid_get_raw_speed(&l_speed, &r_speed);
+                uart_printf(UART0, "enc: l_encoder=%6.1f, r_encoder=%6.1f  yaw=%5.1f  turn=%6.1f  base=%5.1f\n",
+                            l_speed, r_speed, yaw,
+                            steer_control.turn_output, steer_control.base_speed);
+                encoder_print_count = 0;
             }
 
         }
-
-        // uart_printf(UART0, "pitch=%5.1f\r\n",pitch);
-        // uart_printf(UART0, "roll=%5.1f\r\n",roll);
-        // uart_printf(UART0, "yaw=%5.1f\r\n",yaw);
-
-
     }
 }
