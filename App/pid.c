@@ -269,21 +269,21 @@ void speed_pid_get_raw_speed(float *left_speed, float *right_speed)
 
 void pid_app_init(void)
 {
-    /* 速度环初始化 */
+    /* 速度环初始化
+     * PWM/速度比例约 1:20，Kp=0.02 起步较保守
+     * 正向目标 +500 → error*Kp = 500*0.02 = 10 PWM → 约 200 counts/s */
     speed_control_init(&speed_left, MOTOR_LEFT, &encoder_left_count,
-                       0.346f, 0.0f, 0.0f);
+                       0.02f, 0.0f, 0.0f);
     speed_control_init(&speed_right, MOTOR_RIGHT, &encoder_right_count,
-                       0.346f, 0.0f, 0.0f);
+                       0.02f, 0.0f, 0.0f);
 
-    /* 极性配置（已确认）：
-     * 左轮：motor_set_speed(负值) → 向前；向前时 encoder_delta < 0（读数负）
-     *       polarity = -1：speed = delta_count * (-1) = 正值
-     *       这样 setpoint=+正值 对应向前
-     * 右轮：motor_set_speed(正值) → 向前；向前时 encoder_delta > 0（读数正）
-     *       polarity = +1：speed = delta_count * (+1) = 正值
-     *       这样 setpoint=+正值 对应向前
-     * 结论：左右轮向前时 setpoint 都为正值 */
-    speed_left.polarity  = -1.0f;
+    /* 极性配置：
+     * 诊断确认：电机前进时 encoder_delta 为正（计数递增），
+     * 因此左右轮都使用 polarity=+1.0，使 encoder 反馈与 setpoint 方向一致
+     * 
+     * PWM/速度比例：约 1:20（20 PWM ≈ 400 counts/s）
+     * 因此 Kp 需很小（~0.02），避免 error*Kp 立即饱和输出 */
+    speed_left.polarity  = +1.0f;
     speed_right.polarity = +1.0f;
 
     /* 转向环初始化（循迹偏差驱动，保守参数安全起步）
@@ -294,7 +294,7 @@ void pid_app_init(void)
      * max_turn=2000: 最大差速 2000 脉冲/秒 */
     steer_pid_init(400.0f, 0.0f, 0.0f, 2000.0f);
 
-    uart_printf(UART0, "Speed PID init: L(kp=0.346 ki=0 kd=0) R(kp=0.346 ki=0 kd=0)\r\n");
+    uart_printf(UART0, "Speed PID init: L(kp=0.020 ki=0 kd=0) R(kp=0.020 ki=0 kd=0)\r\n");
     uart_printf(UART0, "Steer PID init: kp=400 ki=0 kd=0  max_turn=2000 (patrol error mode)\r\n");
 }
 
@@ -416,7 +416,7 @@ void steer_pid_get_param(float *kp, float *ki, float *kd)
 void steer_pid_update(float position_error, uint32_t dt_ms)
 {
     /* PID 计算：偏差直接作为误差（setpoint=0，目标是居中） */
-    float error = position_error;
+    float error = -position_error;
     float dt = (float)dt_ms / 1000.0f;
 
     PID_Controller_t *pid = &steer_control.pid;

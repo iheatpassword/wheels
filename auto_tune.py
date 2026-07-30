@@ -4,12 +4,16 @@ Wheels 小车自动速度环调参系统
 核心思路：直接解析固件已有的 enc: 调试输出流（每 100ms 一行），
 建立持久串口连接 + 后台读取线程，实现真正的自动化调参。
 
+极性约定：
+  左轮: polarity=+1（编码器方向与电机一致）
+  右轮: polarity=+1（编码器方向与电机一致）
+  正向目标 (setpoint>0) = 前进方向
+
 使用方法:
   python auto_tune.py monitor l              # 实时监控速度
-  python auto_tune.py step l -500 0.3        # 手动单步测试
-  python auto_tune.py kp_scan l -500         # 扫描 Kp 参数
-  python auto_tune.py tune l -500            # 一键全自动调参
-  python auto_tune.py tune b -500            # 双通道调参
+  python auto_tune.py step l 500 0.02        # 手动单步测试 (Kp=0.02, 小保守起步)
+  python auto_tune.py kp_scan l 500          # 扫描 Kp 参数
+  python auto_tune.py tune l 500             # 一键全自动调参
 """
 
 import sys
@@ -34,16 +38,20 @@ class SerialStream:
     """
     持久串口连接 + 后台读取线程
     
-    后台线程持续读取串口，解析 enc: L=xxx R=xxx 行，
-    将最新速度缓存到 speed_cache 中。
+    设计原则：只有后台线程能读串口，主线程通过队列获取响应。
+    - _read_loop: 唯一串口读取者，解析 enc: 更新速度缓存，
+                   其他行放入 response_queue 供 send_cmd 读取
+    - send_cmd:   发送命令后从 response_queue 收集响应
     """
 
     def __init__(self, port=DEFAULT_PORT, baudrate=DEFAULT_BAUDRATE):
         self.port = port
         self.baudrate = baudrate
         self.speed_cache = {'l': None, 'r': None}
+        self.raw_cache = {'l': None, 'r': None}
         self.speed_lock = threading.Lock()
-        self.raw_lines = deque(maxlen=200)
+        self.raw_lines = deque(maxlen=500)
+        self.response_queue = deque()
         self.running = False
         self.ser = None
         self._open()
@@ -72,7 +80,14 @@ class SerialStream:
         self.thread.start()
 
     def _read_loop(self):
-        """后台读取循环"""
+        """
+        后台读取循环（唯一串口读者）
+        
+        解析规则：
+        - enc: 行 → 更新 speed_cache
+        - 其他行 → 放入 response_queue（供 send_cmd 读取）
+        - 所有行 → 放入 raw_lines（供调试）
+        """
         buf = bytearray()
         while self.running:
             try:
@@ -86,9 +101,9 @@ class SerialStream:
                             self._parse_line(line_str)
                 else:
                     time.sleep(0.01)
-            except Exception as e:
+            except Exception:
                 if self.running:
-                    pass
+                    time.sleep(0.1)
 
         if buf:
             line_str = buf.decode('utf-8', errors='replace').strip()
@@ -96,14 +111,25 @@ class SerialStream:
                 self._parse_line(line_str)
 
     def _parse_line(self, line):
-        """解析一行串口数据"""
+        """解析一行数据，路由到对应缓存"""
         self.raw_lines.append(line)
 
+        # 解析 PID 速度和原始编码器速度
+        # 格式: enc: L=xxx.x R=xxx.x | raw: L=xxx R=xxx
         m = re.match(r'enc:\s*L=\s*([+-]?\d+\.?\d*)\s+R=\s*([+-]?\d+\.?\d*)', line)
         if m:
             with self.speed_lock:
                 self.speed_cache['l'] = float(m.group(1))
                 self.speed_cache['r'] = float(m.group(2))
+            
+            # 尝试解析原始编码器速度
+            raw_m = re.search(r'raw:\s*L=\s*([+-]?\d+)\s+R=\s*([+-]?\d+)', line)
+            if raw_m:
+                with self.speed_lock:
+                    self.raw_cache['l'] = int(raw_m.group(1))
+                    self.raw_cache['r'] = int(raw_m.group(2))
+        else:
+            self.response_queue.append(line)
 
     def get_speed(self, ch):
         """获取最新速度（线程安全）"""
@@ -120,6 +146,11 @@ class SerialStream:
         with self.speed_lock:
             return self.speed_cache['l'], self.speed_cache['r']
 
+    def get_raw_speeds(self):
+        """获取双通道原始编码器速度"""
+        with self.speed_lock:
+            return self.raw_cache['l'], self.raw_cache['r']
+
     def wait_speed(self, ch, timeout=3.0):
         """等待速度数据就绪"""
         start = time.time()
@@ -131,38 +162,31 @@ class SerialStream:
 
     def send_cmd(self, cmd, wait=0.5):
         """
-        发送命令并返回响应
+        发送命令并返回响应（从 response_queue 收集）
         
-        跳过 enc: 调试行，只收集命令响应
+        由于只有后台线程读串口，这里通过队列安全获取响应。
         """
         try:
+            self.response_queue.clear()
+
             cmd_bytes = (cmd + "\r\n").encode('utf-8')
             self.ser.write(cmd_bytes)
             self.ser.flush()
 
             start = time.time()
-            buf = bytearray()
+            response_lines = []
             last_data = start
 
             while time.time() - start < wait:
-                if self.ser.in_waiting:
-                    data = self.ser.read(self.ser.in_waiting)
-                    buf.extend(data)
+                while self.response_queue:
+                    line = self.response_queue.popleft()
+                    response_lines.append(line)
                     last_data = time.time()
-                elif len(buf) > 0 and time.time() - last_data > 0.5:
-                    break
-                else:
-                    time.sleep(0.02)
 
-            lines = buf.decode('utf-8', errors='replace').splitlines()
-            response_lines = []
-            for line in lines:
-                line = line.strip()
-                if not line:
-                    continue
-                if line.startswith('enc:'):
-                    continue
-                response_lines.append(line)
+                if response_lines and (time.time() - last_data) > 0.5:
+                    break
+
+                time.sleep(0.02)
 
             return '\n'.join(response_lines)
 
@@ -415,7 +439,7 @@ class AutoTuner:
             dict: {'best_kp': float, 'best_score': float, 'results': list}
         """
         if kp_list is None:
-            kp_list = [0.10, 0.15, 0.20, 0.25, 0.30, 0.35, 0.40, 0.50]
+            kp_list = [0.01, 0.02, 0.03, 0.05, 0.08, 0.10, 0.15, 0.20, 0.30, 0.50]
 
         print(f'\n{"#" * 60}')
         print(f'# Kp 扫描: ch={channel}, target={target}')
@@ -664,12 +688,18 @@ def main():
                         help='运行模式')
     parser.add_argument('channel', choices=['l', 'r', 'b'],
                         help='通道: l=左, r=右, b=双')
-    parser.add_argument('target', nargs='?', type=float, default=-500,
-                        help='目标速度 (counts/s)')
+    parser.add_argument('target', nargs='?', type=float, default=500,
+                        help='目标速度 (counts/s)，正值=前进')
     parser.add_argument('--port', default=DEFAULT_PORT,
                         help=f'串口 (默认 {DEFAULT_PORT})')
     parser.add_argument('--baud', type=int, default=DEFAULT_BAUDRATE,
                         help=f'波特率 (默认 {DEFAULT_BAUDRATE})')
+    parser.add_argument('--kp', type=float, default=0.02,
+                        help='step 模式的 Kp 值 (默认 0.02)')
+    parser.add_argument('--ki', type=float, default=0.0,
+                        help='step 模式的 Ki 值 (默认 0)')
+    parser.add_argument('--kd', type=float, default=0.0,
+                        help='step 模式的 Kd 值 (默认 0)')
 
     if len(sys.argv) < 2:
         parser.print_help()
@@ -703,13 +733,12 @@ def main():
                 time.sleep(0.3)
 
         elif args.mode == 'step':
-            kp = float(sys.argv[4]) if len(sys.argv) > 4 else 0.3
-            print(f'\n🔍 单步测试: ch={args.channel}, target={args.target}, kp={kp}')
-            result = tuner._step_test(args.channel, args.target, kp)
-            tuner.analyzer.print_result(result, kp=kp)
+            print(f'\n🔍 单步测试: ch={args.channel}, target={args.target}, kp={args.kp}')
+            result = tuner._step_test(args.channel, args.target, args.kp, args.ki, args.kd)
+            tuner.analyzer.print_result(result, kp=args.kp, ki=args.ki, kd=args.kd)
 
         elif args.mode == 'kp_scan':
-            kp_list = [0.10, 0.15, 0.20, 0.25, 0.30, 0.35, 0.40, 0.50]
+            kp_list = [0.01, 0.02, 0.03, 0.05, 0.08, 0.10, 0.15, 0.20, 0.30, 0.50]
             tuner.tune_kp(args.channel, args.target, kp_list)
 
         elif args.mode == 'tune':

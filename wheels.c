@@ -38,6 +38,7 @@
 #include "Drivers/motor.h"
 #include "App/patrol.h"
 #include "App/pid.h"
+#include "App/timer.h"
 
 #include "clock.h"
 #include "interrupt.h"
@@ -128,6 +129,8 @@ int main(void)
     /* 初始化循迹模块（加权偏差模式） */
     patrol_init();
     OLED_Clear();
+    /* 初始化计时器（OLED 显示计时） - 必须在 OLED_Clear 之后 */
+    timer_init();
 
     uint32_t encoder_print_count = 0;
     
@@ -137,6 +140,9 @@ int main(void)
 
         /* 处理串口命令 */
         uart_cmd_process();
+        
+        /* 更新计时器 OLED 显示 */
+        timer_update();
         
         /* 控制周期：10ms 中断触发 */
         if (read_patrol)
@@ -155,11 +161,10 @@ int main(void)
             encoder_print_count++;
             if (encoder_print_count >= 10)
             {
-                float l_speed, r_speed;
-                speed_pid_get_raw_speed(&l_speed, &r_speed);
-                /* 简化调试输出：只显示速度 */
-                uart_printf(UART0, "enc: L=%6.1f R=%6.1f\n",
-                            l_speed, r_speed);
+                /* 诊断输出：包含 PID 内部状态 */
+                uart_printf(UART0, "D: sp=%6.1f spd=%8.1f out=%6d cnt=%10d\r\n",
+                            speed_left.pid.setpoint, speed_left.speed,
+                            (int)speed_left.pid.output, (int)encoder_left_count);
                 encoder_print_count = 0;
             }
 

@@ -4,6 +4,7 @@
 #include "clock.h"
 #include "App/pid.h"
 #include "App/patrol.h"
+#include "App/timer.h"
 
 /* 10ms 中断标志，由 TIMER_0 中断设置，主循环清除 */
 volatile uint8_t read_patrol = 0;
@@ -384,6 +385,43 @@ static void uart_cmd_debug_speed_off(const char *args)
     uart_printf(UART0, "OK normal mode (patrol protection on)\r\n");
 }
 
+/* ==================== 计时器命令 ==================== */
+
+/* 处理计时器开始命令：tstart */
+static void uart_cmd_tstart(const char *args)
+{
+    (void)args;
+    timer_start();
+    uart_printf(UART0, "Timer START\r\n");
+}
+
+/* 处理计时器停止命令：tstop */
+static void uart_cmd_tstop(const char *args)
+{
+    (void)args;
+    timer_stop();
+    uint32_t elapsed = timer_get_elapsed_ms();
+    uart_printf(UART0, "Timer STOP: %lu ms elapsed\r\n", elapsed);
+}
+
+/* 处理计时器重置命令：treset */
+static void uart_cmd_treset(const char *args)
+{
+    (void)args;
+    timer_reset();
+    uart_printf(UART0, "Timer RESET\r\n");
+}
+
+/* 获取计时器状态：gtimer */
+static void uart_cmd_gtimer(const char *args)
+{
+    (void)args;
+    TimerState_t state = timer_get_state();
+    uint32_t elapsed = timer_get_elapsed_ms();
+    const char *state_str = (state == TIMER_RUNNING) ? "RUNNING" : "STOPPED";
+    uart_printf(UART0, "Timer: %s, elapsed=%lu ms\r\n", state_str, elapsed);
+}
+
 /* 处理帮助命令 */
 static void uart_cmd_help(void)
 {
@@ -410,6 +448,12 @@ static void uart_cmd_help(void)
     uart_printf(UART0, "  gpatrol                   - Show patrol sensors + error\r\n");
     uart_printf(UART0, "  sbase <cnt/s>             - Set base forward speed (0=stop)\r\n");
     uart_printf(UART0, "  sstop                     - Stop steer + speed loop\r\n");
+    uart_printf(UART0, "\r\n");
+    uart_printf(UART0, "Timer (OLED Display):\r\n");
+    uart_printf(UART0, "  tstart                    - Start timer\r\n");
+    uart_printf(UART0, "  tstop                     - Stop timer\r\n");
+    uart_printf(UART0, "  treset                    - Reset timer\r\n");
+    uart_printf(UART0, "  gtimer                    - Get timer status\r\n");
     uart_printf(UART0, "\r\n");
     uart_printf(UART0, "  ch: l=left, r=right, b=both (default)\r\n");
     uart_printf(UART0, "  help                 - Show this help\r\n");
@@ -499,8 +543,8 @@ void uart_cmd_process(void)
     } else if (cmd[0] == 'd' && cmd[1] == 'e' && cmd[2] == 'b' && cmd[3] == 'u' && 
                cmd[4] == 'g' && cmd[5] == '_' && cmd[6] == 's' && cmd[7] == 'p' &&
                cmd[8] == 'e' && cmd[9] == 'e' && cmd[10] == 'd' && cmd[11] == '_' &&
-               cmd[12] == 'o' && cmd[13] == 'n' &&
-               (cmd[14] == ' ' || cmd[14] == '\t' || cmd[14] == '\0')) {
+               cmd[12] == 'o' && cmd[13] == 'n' && cmd[14] == 'l' && cmd[15] == 'y' &&
+               (cmd[16] == ' ' || cmd[16] == '\t' || cmd[16] == '\0')) {
         /* debug_speed_only */
         uart_cmd_debug_speed_only(cmd);
     } else if (cmd[0] == 'd' && cmd[1] == 'e' && cmd[2] == 'b' && cmd[3] == 'u' && 
@@ -519,6 +563,22 @@ void uart_cmd_process(void)
     } else if (cmd[0] == 'm' && cmd[1] == 's' && cmd[2] == 't' && cmd[3] == 'o' && cmd[4] == 'p' && 
               (cmd[5] == ' ' || cmd[5] == '\t' || cmd[5] == '\0')) {
         uart_cmd_motor_stop();
+    } else if (cmd[0] == 't' && cmd[1] == 's' && cmd[2] == 't' && cmd[3] == 'a' && cmd[4] == 'r' &&
+               (cmd[5] == ' ' || cmd[5] == '\t' || cmd[5] == '\0')) {
+        /* tstart */
+        uart_cmd_tstart(cmd);
+    } else if (cmd[0] == 't' && cmd[1] == 's' && cmd[2] == 't' && cmd[3] == 'o' && cmd[4] == 'p' &&
+               (cmd[5] == ' ' || cmd[5] == '\t' || cmd[5] == '\0')) {
+        /* tstop */
+        uart_cmd_tstop(cmd);
+    } else if (cmd[0] == 't' && cmd[1] == 'r' && cmd[2] == 'e' && cmd[3] == 's' && cmd[4] == 'e' &&
+               (cmd[5] == 't' || cmd[5] == ' ' || cmd[5] == '\t' || cmd[5] == '\0')) {
+        /* treset */
+        uart_cmd_treset(cmd);
+    } else if (cmd[0] == 'g' && cmd[1] == 't' && cmd[2] == 'i' && cmd[3] == 'm' && cmd[4] == 'e' &&
+               (cmd[5] == 'r' || cmd[5] == ' ' || cmd[5] == '\t' || cmd[5] == '\0')) {
+        /* gtimer */
+        uart_cmd_gtimer(cmd);
     } else if (cmd[0] == 'h' && cmd[1] == 'e' && cmd[2] == 'l' && cmd[3] == 'p' && 
               (cmd[4] == ' ' || cmd[4] == '\t' || cmd[4] == '\0')) {
         uart_cmd_help();
