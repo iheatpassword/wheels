@@ -8,6 +8,9 @@
 /* 10ms 中断标志，由 TIMER_0 中断设置，主循环清除 */
 volatile uint8_t read_patrol = 0;
 
+/* 调试模式：1=仅速度环（禁用循迹保护），0=正常模式 */
+volatile uint8_t debug_speed_only = 0;
+
 void TIMER_0_INST_IRQHandler(void)
 {
     switch (DL_TimerG_getPendingInterrupt(TIMER_0_INST)) {
@@ -365,6 +368,22 @@ static void uart_cmd_sstop(const char *args)
     uart_printf(UART0, "OK steer + speed stopped\r\n");
 }
 
+/* 启用调试模式：仅速度环（禁用循迹保护） */
+static void uart_cmd_debug_speed_only(const char *args)
+{
+    (void)args;
+    debug_speed_only = 1;
+    uart_printf(UART0, "OK debug speed-only mode enabled\r\n");
+}
+
+/* 恢复正常模式：启用循迹保护 */
+static void uart_cmd_debug_speed_off(const char *args)
+{
+    (void)args;
+    debug_speed_only = 0;
+    uart_printf(UART0, "OK normal mode (patrol protection on)\r\n");
+}
+
 /* 处理帮助命令 */
 static void uart_cmd_help(void)
 {
@@ -477,6 +496,20 @@ void uart_cmd_process(void)
                (cmd[5] == ' ' || cmd[5] == '\t' || cmd[5] == '\0')) {
         /* sstop */
         uart_cmd_sstop(cmd);
+    } else if (cmd[0] == 'd' && cmd[1] == 'e' && cmd[2] == 'b' && cmd[3] == 'u' && 
+               cmd[4] == 'g' && cmd[5] == '_' && cmd[6] == 's' && cmd[7] == 'p' &&
+               cmd[8] == 'e' && cmd[9] == 'e' && cmd[10] == 'd' && cmd[11] == '_' &&
+               cmd[12] == 'o' && cmd[13] == 'n' &&
+               (cmd[14] == ' ' || cmd[14] == '\t' || cmd[14] == '\0')) {
+        /* debug_speed_only */
+        uart_cmd_debug_speed_only(cmd);
+    } else if (cmd[0] == 'd' && cmd[1] == 'e' && cmd[2] == 'b' && cmd[3] == 'u' && 
+               cmd[4] == 'g' && cmd[5] == '_' && cmd[6] == 's' && cmd[7] == 'p' &&
+               cmd[8] == 'e' && cmd[9] == 'e' && cmd[10] == 'd' && cmd[11] == '_' &&
+               cmd[12] == 'o' && cmd[13] == 'f' && cmd[14] == 'f' &&
+               (cmd[15] == ' ' || cmd[15] == '\t' || cmd[15] == '\0')) {
+        /* debug_speed_off */
+        uart_cmd_debug_speed_off(cmd);
     } else if (cmd[0] == 'm' && (cmd[1] == ' ' || cmd[1] == '\t' || cmd[1] == '\0')) {
         if (cmd[1] == '\0') {
             uart_cmd_motor_stop();

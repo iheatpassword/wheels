@@ -44,6 +44,9 @@
 #include "mpu6050.h"
 #include "oled_hardware_i2c.h"
 
+/* 外部变量：调试模式标志（定义在 gFunc.c） */
+extern volatile uint8_t debug_speed_only;
+
 // expect phenomenon: if four-way patrol not detect black, led0 on
 void patrol_test(void)
 {
@@ -140,20 +143,10 @@ int main(void)
         {
             read_patrol = 0;
 
-            /* 1) 循迹：读取 4 路传感器，计算加权偏差 */
-            float position_error = 0.0f;
-            PatrolStatus_t pat_status = patrol_get_error(&position_error);
-
-            /* 2) 转向环：根据偏差输出差速，设置左右轮目标速度
-             *    边界处理：丢线(LOST)/路口(JUNCTION) → 停车 */
-            if (pat_status == PATROL_OK) {
-                steer_pid_update(position_error, 10);
-            } else {
-                /* 丢线或全黑路口：目标速度置 0（速度环会自然减速停车） */
-                speed_control_set(&speed_left, 0.0f);
-                speed_control_set(&speed_right, 0.0f);
-                steer_control.turn_output = 0.0f;
-            }
+            /* === 速度环调试模式：跳过循迹保护和转向环 ===
+             * 直接使用 starget 命令设置的目标速度
+             * 注释掉循迹相关代码后，starget 命令设置的目标速度会一直保持
+             */
 
             /* 3) 速度环：根据目标速度驱动 PWM 输出 */
             pid_app_update(10);
@@ -164,13 +157,9 @@ int main(void)
             {
                 float l_speed, r_speed;
                 speed_pid_get_raw_speed(&l_speed, &r_speed);
-                uint8_t r2, r1, l1, l2;
-                patrol_get_raw(&r2, &r1, &l1, &l2);
-                const char *st = (pat_status == PATROL_OK) ? "OK"
-                               : (pat_status == PATROL_LOST) ? "LOST" : "JCT";
-                uart_printf(UART0, "enc: L=%6.1f R=%6.1f | pat[%d%d%d%d] %s err=%+4.2f turn=%+6.1f base=%5.1f\n",
-                            l_speed, r_speed, r2, r1, l1, l2, st,
-                            position_error, steer_control.turn_output, steer_control.base_speed);
+                /* 简化调试输出：只显示速度 */
+                uart_printf(UART0, "enc: L=%6.1f R=%6.1f\n",
+                            l_speed, r_speed);
                 encoder_print_count = 0;
             }
 
