@@ -156,26 +156,26 @@ int main(void)
          * 读取循迹传感器 → 计算转向 PID → 设置左右轮目标速度
          * 方向环独立于速度环运行，提供目标速度给速度环跟踪
          */
-        // if (steer_flag)
-        // {
-        //     steer_flag = 0;
+        if (steer_flag)
+        {
+            steer_flag = 0;
 
-        //     if (!debug_speed_only)
-        //     {
-        //         float error;
-        //         PatrolStatus_t st = patrol_get_error(&error);
+            if (!debug_speed_only)
+            {
+                float error;
+                PatrolStatus_t st = patrol_get_error(&error);
 
-        //         /* 边界保护：丢线/路口停车 */
-        //         if (st == PATROL_LOST || st == PATROL_JUNCTION)
-        //         {
-        //             steer_stop();
-        //         }
-        //         else
-        //         {
-        //             steer_step(error, 20);
-        //         }
-        //     }
-        // }
+                /* 边界保护：丢线/路口停车 */
+                if (st == PATROL_LOST || st == PATROL_JUNCTION)
+                {
+                    steer_stop();
+                }
+                else
+                {
+                    steer_step(error, 20);
+                }
+            }
+        }
 
         /* 10ms 周期 (100Hz): 速度环
          * 采样编码器增量 → 速度 PID → PWM 输出
@@ -191,22 +191,14 @@ int main(void)
 
         /* 100ms 周期：调试输出
          * 注意：auto_tune.py 解析 "D: %5.1f, %5.1f, %d, %10d" 格式
-         *   字段含义：[0] 左目标速度, [1] 左实测速度, [2] 左 PID 输出(PWM), [3] 左编码器增量 */
+         *   字段含义：[0] 左目标速度, [1] 左实测速度, [2] 左 PID 输出(PWM), [3] 左编码器增量
+         * 直接复用 speed_update 已算好的 last_out / last_delta，避免重算与实际输出不一致 */
         if (encoder_flag)
         {
             encoder_flag = 0;
-            float spd = g_spd_left.speed;
-            float err = g_spd_left.pid.setpoint - spd;
-            float derr = (err - g_spd_left.pid.last_error) / 0.01f;
-            float out = g_spd_left.pid.kp * err
-                      + g_spd_left.pid.ki * g_spd_left.pid.integral
-                      + g_spd_left.pid.kd * derr;
-            if (out >  (float)MOTOR_PWM_MAX_DUTY) out =  MOTOR_PWM_MAX_DUTY;
-            if (out < -(float)MOTOR_PWM_MAX_DUTY) out = -MOTOR_PWM_MAX_DUTY;
-
             uart_printf(UART0, "D: %5.1f, %5.1f, %d, %10d\r\n",
-                        g_spd_left.pid.setpoint, spd,
-                        (int)out, (int)g_spd_left.last_delta);
+                        g_spd_left.pid.setpoint, g_spd_left.speed,
+                        (int)g_spd_left.last_out, (int)g_spd_left.last_delta);
         }
     }
 }

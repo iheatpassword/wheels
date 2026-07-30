@@ -93,6 +93,7 @@ void speed_update(MotorSpeed_t *s, int32_t delta, float dt_ms)
     float vel = (float)delta / (dt_ms / 1000.0f);
     s->last_delta = delta;
     float out = pid_step(&s->pid, s->pid.setpoint, vel, dt_ms / 1000.0f);
+    s->last_out = out;
     int16_t pwm;
     if (out >  (float)MOTOR_PWM_MAX_DUTY) pwm =  MOTOR_PWM_MAX_DUTY;
     else if (out < -(float)MOTOR_PWM_MAX_DUTY) pwm = -MOTOR_PWM_MAX_DUTY;
@@ -106,8 +107,9 @@ void speed_stop(MotorSpeed_t *s)
     if (s == NULL) return;
     pid_reset(&s->pid);
     s->pid.setpoint = 0.0f;
-    s->speed     = 0.0f;
+    s->speed      = 0.0f;
     s->last_delta = 0;
+    s->last_out   = 0.0f;
     motor_set_speed(s->ch, 0);
 }
 

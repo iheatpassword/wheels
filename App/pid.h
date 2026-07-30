@@ -32,6 +32,7 @@ typedef struct {
     Motor_Channel_t ch;
     float  speed;
     int32_t last_delta;
+    float  last_out;   /* speed_update 最近一次实际输出（限幅后，下发 PWM 前） */
 } MotorSpeed_t;
 
 /* ==========================================================================
