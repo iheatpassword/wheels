@@ -30,4 +30,9 @@ void motor_brake_both(void);
 void motor_standby(bool enable);
 void motor_test(void);
 
+/* 方向反转测试：每 2 秒翻转目标速度，用于验证编码器极性和 PID 响应 */
+void motor_dir_test_start(float speed);
+void motor_dir_test_stop(void);
+void motor_dir_test_update(void);
+
 #endif

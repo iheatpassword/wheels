@@ -238,3 +238,23 @@ void uart_printf(UART_Regs* uart, char* fmt, ...)
 
     va_end(args);
 }
+
+/* JustFloat 协议：发送 float 数组 + 帧尾 {0x00, 0x00, 0x80, 0x7f}
+ * 格式：[float0 小端4字节] [float1] ... [floatN] [00 00 80 7F]
+ * 用 union 保证 float 内存布局正确，避免指针别名问题 */
+void uart_justfloat(UART_Regs* uart, float *data, uint8_t count)
+{
+    union { float f; uint8_t b[4]; } u;
+    for (uint8_t i = 0; i < count; i++) {
+        u.f = data[i];
+        uart_putchar(uart, (char)u.b[0]);
+        uart_putchar(uart, (char)u.b[1]);
+        uart_putchar(uart, (char)u.b[2]);
+        uart_putchar(uart, (char)u.b[3]);
+    }
+    /* 帧尾：IEEE 754 +INF (小端: 00 00 80 7f) */
+    uart_putchar(uart, (char)0x00);
+    uart_putchar(uart, (char)0x00);
+    uart_putchar(uart, (char)0x80);
+    uart_putchar(uart, (char)0x7f);
+}

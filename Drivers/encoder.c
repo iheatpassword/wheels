@@ -1,10 +1,12 @@
 /*
  * 编码器驱动（极简采样接口）
  * 极性约定：正增量 = 电机前进方向
+ * 采样时清零计数器并打时间戳，dt 由调用方传入计算速度
  */
 
 #include "encoder.h"
 #include "interrupt.h"
+#include "clock.h"
 
 volatile int32_t encoder_left_count = 0;
 volatile int32_t encoder_right_count = 0;
@@ -33,17 +35,37 @@ void encoder_init(void)
     enable_group1_irq = 1;
 }
 
-int32_t encoder_sample_left(void)
+/* 采样左轮增量并打时间戳。dt_ms 输出距上次采样的真实间隔（ms）。
+ * 首次调用 dt_ms 返回 0，调用方应跳过本次 PID 计算。 */
+int32_t encoder_sample_left(float *dt_ms)
 {
     int32_t temp = encoder_left_count;
     encoder_left_count = 0;
+
+    static unsigned long last_tick = 0;
+    static uint8_t first = 1;
+    unsigned long now = tick_ms;
+    float dt = first ? 0.0f : (float)(now - last_tick);
+    first = 0;
+    last_tick = now;
+    if (dt_ms) *dt_ms = dt;
     return temp;
 }
 
-int32_t encoder_sample_right(void)
+/* 采样右轮增量并打时间戳。dt_ms 输出距上次采样的真实间隔（ms）。
+ * 首次调用 dt_ms 返回 0，调用方应跳过本次 PID 计算。 */
+int32_t encoder_sample_right(float *dt_ms)
 {
     int32_t temp = encoder_right_count;
     encoder_right_count = 0;
+
+    static unsigned long last_tick = 0;
+    static uint8_t first = 1;
+    unsigned long now = tick_ms;
+    float dt = first ? 0.0f : (float)(now - last_tick);
+    first = 0;
+    last_tick = now;
+    if (dt_ms) *dt_ms = dt;
     return temp;
 }
 

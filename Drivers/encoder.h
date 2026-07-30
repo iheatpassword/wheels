@@ -6,8 +6,10 @@ extern volatile int32_t encoder_left_count;
 extern volatile int32_t encoder_right_count;
 
 void    encoder_init(void);
-int32_t encoder_sample_left(void);
-int32_t encoder_sample_right(void);
+
+/* 采样增量并打时间戳。dt_ms 输出距上次采样的真实间隔（ms），首次返回 0。 */
+int32_t encoder_sample_left(float *dt_ms);
+int32_t encoder_sample_right(float *dt_ms);
 void    encoder_reset(void);
 void    encoder_reset_all(void);
 

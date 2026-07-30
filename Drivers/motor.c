@@ -162,3 +162,69 @@ void motor_test(void)
         last_time = millis();
     }
 }
+
+/* ==================== 方向反转测试 ==================== */
+#include "App/pid.h"
+#include "clock.h"
+
+static volatile uint8_t dir_test_active = 0;
+static volatile float   dir_test_target = 0;
+static volatile uint32_t dir_test_last_switch = 0;
+static volatile uint8_t dir_test_polarity = 1;  /* 1=正向, -1=反向 */
+
+/* 启动反转测试 */
+void motor_dir_test_start(float speed)
+{
+    dir_test_target = speed;
+    dir_test_polarity = 1;
+    dir_test_last_switch = tick_ms;
+    dir_test_active = 1;
+    
+    /* 设置初始目标速度 */
+    speed_set_target(&g_spd_left,  speed);
+    speed_set_target(&g_spd_right, speed);
+    
+    /* 打印测试开始信息 */
+    uart_printf(UART0, "\r\n=== Motor Direction Test ===\r\n");
+    uart_printf(UART0, "Target speed: %.0f counts/s\r\n", speed);
+    uart_printf(UART0, "Switch interval: 2000ms\r\n");
+    uart_printf(UART0, "Press 'mdtest_stop' to stop\r\n\r\n");
+}
+
+/* 停止反转测试 */
+void motor_dir_test_stop(void)
+{
+    dir_test_active = 0;
+    dir_test_target = 0;
+    dir_test_polarity = 1;
+    
+    /* 停止电机并清除 PID */
+    speed_stop(&g_spd_left);
+    speed_stop(&g_spd_right);
+    
+    uart_printf(UART0, "\r\n=== Direction Test Stopped ===\r\n\r\n");
+}
+
+/* 更新反转测试（在速度环中调用） */
+void motor_dir_test_update(void)
+{
+    if (!dir_test_active) return;
+    
+    uint32_t now = tick_ms;
+    if (now - dir_test_last_switch >= 2000) {
+        dir_test_polarity = -dir_test_polarity;
+        dir_test_last_switch = now;
+        
+        float new_target = dir_test_target * dir_test_polarity;
+        speed_set_target(&g_spd_left,  new_target);
+        speed_set_target(&g_spd_right, new_target);
+        
+        /* 打印反转瞬间的信息 */
+        uart_printf(UART0, "SWITCH: polarity=%d new_target=%+.0f speed=%.0f delta=%ld pwm=%.0f\r\n",
+                    dir_test_polarity,
+                    new_target,
+                    g_spd_left.speed,
+                    (long)g_spd_left.last_delta,
+                    g_spd_left.last_out);
+    }
+}

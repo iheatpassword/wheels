@@ -295,6 +295,35 @@ static void uart_cmd_skd(const char *args)
     }
 }
 
+/* 设置速度环滤波系数：sfilter <ch> <alpha>
+ * alpha: 1=无滤波, 0.5=中等, 0.1=强滤波 */
+static void uart_cmd_sfilter(const char *args)
+{
+    const char *p = uart_find_next_arg(args);
+    if (*p == '\0') {
+        uart_printf(UART0, "Usage: sfilter <l|r|b> <alpha>\r\n");
+        return;
+    }
+
+    uint8_t ch = uart_parse_channel(*p);
+    p = uart_find_next_arg(p);
+
+    if (*p == '\0') {
+        uart_printf(UART0, "Usage: sfilter <l|r|b> <alpha>\r\n");
+        return;
+    }
+    float alpha = uart_atof(p);
+
+    if (ch == 0 || ch == 2) {
+        speed_set_filter(&g_spd_left, alpha);
+        uart_printf(UART0, "OK L filter=%5.3f\r\n", alpha);
+    }
+    if (ch == 1 || ch == 2) {
+        speed_set_filter(&g_spd_right, alpha);
+        uart_printf(UART0, "OK R filter=%5.3f\r\n", alpha);
+    }
+}
+
 /* 处理 PID 参数获取命令：gpid [ch] */
 static void uart_cmd_gpid(const char *args)
 {
@@ -336,11 +365,11 @@ static void uart_cmd_starget(const char *args)
 
     if (ch == 0 || ch == 2) {
         speed_set_target(&g_spd_left, target);
-        uart_printf(UART0, "OK L target=%5.1f\r\n", target);
+        uart_printf(UART0, "OK L target=%5.1f (setpoint updated)\r\n", target);
     }
     if (ch == 1 || ch == 2) {
         speed_set_target(&g_spd_right, target);
-        uart_printf(UART0, "OK R target=%5.1f\r\n", target);
+        uart_printf(UART0, "OK R target=%5.1f (setpoint updated)\r\n", target);
     }
 }
 
@@ -456,6 +485,27 @@ static void uart_cmd_sstop(const char *args)
     uart_printf(UART0, "OK steer + speed stopped\r\n");
 }
 
+/* 启动电机方向反转测试：mdtest <speed>
+ * speed: 目标速度 (counts/s)，每 2 秒翻转一次方向 */
+static void uart_cmd_mdtest_start(const char *args)
+{
+    const char *p = uart_find_next_arg(args);
+    if (*p == '\0') {
+        uart_printf(UART0, "Usage: mdtest <speed>\r\n");
+        uart_printf(UART0, "  speed: target speed in counts/s (e.g. 500)\r\n");
+        return;
+    }
+    float speed = uart_atof(p);
+    motor_dir_test_start(speed);
+}
+
+/* 停止电机方向反转测试：mdtest_stop */
+static void uart_cmd_mdtest_stop(const char *args)
+{
+    (void)args;
+    motor_dir_test_stop();
+}
+
 /* 启用调试模式：仅速度环（禁用循迹保护） */
 static void uart_cmd_debug_speed_only(const char *args)
 {
@@ -525,6 +575,7 @@ static void uart_cmd_help(void)
     uart_printf(UART0, "  skp <ch> <kp>             - Set kp only\r\n");
     uart_printf(UART0, "  ski <ch> <ki>             - Set ki only\r\n");
     uart_printf(UART0, "  skd <ch> <kd>             - Set kd only\r\n");
+    uart_printf(UART0, "  sfilter <ch> <alpha>      - Set speed filter (0=strong, 1=none)\r\n");
     uart_printf(UART0, "  gpid [ch]                 - Get speed PID params\r\n");
     uart_printf(UART0, "  starget <ch> <speed>      - Set target speed (cnt/s)\r\n");
     uart_printf(UART0, "  gspeed [ch]               - Get current speed\r\n");
@@ -584,6 +635,18 @@ void uart_cmd_process(void)
                (cmd[3] == ' ' || cmd[3] == '\t' || cmd[3] == '\0')) {
         /* skd <ch> <kd> */
         uart_cmd_skd(cmd);
+    } else if (cmd[0] == 's' && cmd[1] == 'f' && cmd[2] == 'i' && cmd[3] == 'l' && cmd[4] == 't' && cmd[5] == 'e' && cmd[6] == 'r' &&
+               (cmd[7] == ' ' || cmd[7] == '\t' || cmd[7] == '\0')) {
+        /* sfilter <ch> <alpha> */
+        uart_cmd_sfilter(cmd);
+    } else if (cmd[0] == 'm' && cmd[1] == 'd' && cmd[2] == 't' && cmd[3] == 'e' && cmd[4] == 's' && cmd[5] == 't' &&
+               (cmd[6] == ' ' || cmd[6] == '\t' || cmd[6] == '\0')) {
+        /* mdtest <speed> */
+        uart_cmd_mdtest_start(cmd);
+    } else if (cmd[0] == 'm' && cmd[1] == 'd' && cmd[2] == 't' && cmd[3] == 'e' && cmd[4] == 's' && cmd[5] == 't' && cmd[6] == '_' && cmd[7] == 's' && cmd[8] == 't' && cmd[9] == 'o' && cmd[10] == 'p' &&
+               (cmd[11] == ' ' || cmd[11] == '\t' || cmd[11] == '\0')) {
+        /* mdtest_stop */
+        uart_cmd_mdtest_stop(cmd);
     } else if (cmd[0] == 'g' && cmd[1] == 'p' && cmd[2] == 'i' && cmd[3] == 'd' &&
                (cmd[4] == ' ' || cmd[4] == '\t' || cmd[4] == '\0')) {
         /* gpid [ch] */

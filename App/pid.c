@@ -28,11 +28,22 @@ void pid_reset(PID_t *p)
 float pid_step(PID_t *p, float setpoint, float measure, float dt)
 {
     float error = setpoint - measure;
-    p->integral += error * dt;
-    if (p->integral >  p->integral_max) p->integral =  p->integral_max;
-    if (p->integral < -p->integral_max) p->integral = -p->integral_max;
     float derivative = (error - p->last_error) / dt;
-    float out = p->kp * error + p->ki * p->integral + p->kd * derivative;
+    float p_term = p->kp * error;
+    float d_term = p->kd * derivative;
+
+    /* 条件积分抗饱和：输出已饱和且积分仍往饱和方向推时，停止累加。
+     * 允许误差反向时继续积分，帮助退出饱和。 */
+    float i_term = p->ki * p->integral;
+    float saturated_hi = (p_term + i_term + d_term >= p->out_max) && (error > 0);
+    float saturated_lo = (p_term + i_term + d_term <= p->out_min) && (error < 0);
+    if (!saturated_hi && !saturated_lo) {
+        p->integral += error * dt;
+        if (p->integral >  p->integral_max) p->integral =  p->integral_max;
+        if (p->integral < -p->integral_max) p->integral = -p->integral_max;
+    }
+
+    float out = p_term + p->ki * p->integral + d_term;
     if (out >  p->out_max) out =  p->out_max;
     if (out <  p->out_min) out =  p->out_min;
     p->last_error = error;
@@ -42,12 +53,22 @@ float pid_step(PID_t *p, float setpoint, float measure, float dt)
 void speed_init(MotorSpeed_t *s, Motor_Channel_t ch,
                 float kp, float ki, float kd)
 {
-    s->ch        = ch;
-    s->speed     = 0.0f;
-    s->last_delta = 0;
+    s->ch            = ch;
+    s->speed         = 0.0f;
+    s->speed_raw     = 0.0f;
+    s->filter_alpha  = 0.3f;  /* 默认中等滤波 */
+    s->last_delta    = 0;
     pid_begin(&s->pid, kp, ki, kd,
               (float)MOTOR_PWM_MAX_DUTY,
               (float)MOTOR_PWM_MAX_DUTY * 0.5f);
+}
+
+/* 设置一阶低通系数：1=无滤波, 0.5=中等, 0.1=强滤波 */
+void speed_set_filter(MotorSpeed_t *s, float alpha)
+{
+    if (alpha < 0.0f) alpha = 0.0f;
+    if (alpha > 1.0f) alpha = 1.0f;
+    s->filter_alpha = alpha;
 }
 
 void speed_set_target(MotorSpeed_t *s, float target)
@@ -90,16 +111,20 @@ float speed_get_speed(MotorSpeed_t *s)
 
 void speed_update(MotorSpeed_t *s, int32_t delta, float dt_ms)
 {
-    float vel = (float)delta / (dt_ms / 1000.0f);
+    float vel_raw = (float)delta / (dt_ms / 1000.0f);  /* 原始速度 */
+    s->speed_raw = vel_raw;
+
+    /* 一阶低通滤波：filtered = alpha * raw + (1-alpha) * filtered_old */
+    s->speed = s->filter_alpha * vel_raw + (1.0f - s->filter_alpha) * s->speed;
+
     s->last_delta = delta;
-    float out = pid_step(&s->pid, s->pid.setpoint, vel, dt_ms / 1000.0f);
+    float out = pid_step(&s->pid, s->pid.setpoint, s->speed, dt_ms / 1000.0f);
     s->last_out = out;
     int16_t pwm;
     if (out >  (float)MOTOR_PWM_MAX_DUTY) pwm =  MOTOR_PWM_MAX_DUTY;
     else if (out < -(float)MOTOR_PWM_MAX_DUTY) pwm = -MOTOR_PWM_MAX_DUTY;
     else                                  pwm = (int16_t)out;
     motor_set_speed(s->ch, pwm);
-    s->speed = vel;
 }
 
 void speed_stop(MotorSpeed_t *s)
@@ -108,6 +133,7 @@ void speed_stop(MotorSpeed_t *s)
     pid_reset(&s->pid);
     s->pid.setpoint = 0.0f;
     s->speed      = 0.0f;
+    s->speed_raw  = 0.0f;
     s->last_delta = 0;
     s->last_out   = 0.0f;
     motor_set_speed(s->ch, 0);

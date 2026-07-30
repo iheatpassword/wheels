@@ -141,7 +141,7 @@ int main(void)
     
     while (1) {
         led_test();
-
+        // motor_test();
         /* 处理串口命令 */
         uart_cmd_process();
 
@@ -177,28 +177,28 @@ int main(void)
             }
         }
 
-        /* 10ms 周期 (100Hz): 速度环
-         * 采样编码器增量 → 速度 PID → PWM 输出
+        /* 10ms 周期 (100Hz): 速度环 + 调试输出
+         * 采样编码器增量（打时间戳）→ 真实 dt 算速度 → PID → PWM → 调试串口
+         * 波特率 115200，100Hz 下 D 串输出约 2.6ms，可接受
+         * dt=0 表示首次采样，无基准，跳过本次 PID
          */
         if (speed_flag)
         {
             speed_flag = 0;
-            int32_t dl = encoder_sample_left();
-            int32_t dr = encoder_sample_right();
-            speed_update(&g_spd_left,  dl,  10.0f);
-            speed_update(&g_spd_right, dr, 10.0f);
-        }
+            float dtl = 0.0f, dtr = 0.0f;
+            int32_t dl = encoder_sample_left(&dtl);
+            int32_t dr = encoder_sample_right(&dtr);
+            if (dtl > 0.0f) speed_update(&g_spd_left,  dl, dtl);
+            if (dtr > 0.0f) speed_update(&g_spd_right, dr, dtr);
 
-        /* 100ms 周期：调试输出
-         * 注意：auto_tune.py 解析 "D: %5.1f, %5.1f, %d, %10d" 格式
-         *   字段含义：[0] 左目标速度, [1] 左实测速度, [2] 左 PID 输出(PWM), [3] 左编码器增量
-         * 直接复用 speed_update 已算好的 last_out / last_delta，避免重算与实际输出不一致 */
-        if (encoder_flag)
-        {
-            encoder_flag = 0;
+            /* 电机方向反转测试更新（如果激活） */
+            motor_dir_test_update();
+
+            /* 文本调试输出：auto_tune.py 解析 "D: %5.1f, %5.1f, %d, %10d" 格式
+             * 字段：[0]左目标速度 [1]左实测速度 [2]左PID输出(PWM) [3]左编码器增量 */
             uart_printf(UART0, "D: %5.1f, %5.1f, %d, %10d\r\n",
                         g_spd_left.pid.setpoint, g_spd_left.speed,
-                        (int)g_spd_left.last_out, (int)g_spd_left.last_delta);
+                        (int)g_spd_left.last_out, (int)g_spd_left.last_delta);           
         }
     }
 }
