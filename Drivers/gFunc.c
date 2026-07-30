@@ -6,21 +6,41 @@
 #include "App/patrol.h"
 #include "App/timer.h"
 
-/* 10ms 中断标志，由 TIMER_0 中断设置，主循环清除 */
-volatile uint8_t read_patrol = 0;
+/* 控制周期标志 (由 TIMER_0 中断设置, 主循环清除) */
+volatile uint8_t steer_flag = 0;   /* 20ms (50Hz) 方向环 */
+volatile uint8_t speed_flag = 0;   /* 10ms (100Hz) 速度环 */
+volatile uint8_t encoder_flag = 0; /* 20ms 调试输出 */
+volatile uint8_t oled_flag = 0;    /* 100ms OLED 刷新 */
 
 /* 调试模式：1=仅速度环（禁用循迹保护），0=正常模式 */
-volatile uint8_t debug_speed_only = 0;
+volatile uint8_t debug_speed_only = 1;
 
 void TIMER_0_INST_IRQHandler(void)
 {
+    static uint32_t counter=0;
     switch (DL_TimerG_getPendingInterrupt(TIMER_0_INST)) {
         case DL_TIMER_IIDX_ZERO:
-            /* 10ms 周期触发，仅设置标志，实际处理在主循环 */
-            read_patrol = 1;
+            /* 10ms 基本周期触发，仅设置标志，实际处理在主循环 */
+            counter++;
+
+            /* 10ms: 速度环 (100Hz) */
+            speed_flag = 1;
+
+            /* 20ms: 方向环 + 调试输出 (50Hz) */
+            if((counter % 2) == 0) {
+                steer_flag = 1;
+                
+            }
+
+            /* 100ms: OLED 刷新 (10Hz) */
+            if((counter % 10) == 0) {
+                oled_flag = 1;
+                encoder_flag = 1;
+            }
+
             break;
         default:
-            break;    
+            break;
     }
 }
 
@@ -132,14 +152,16 @@ static void uart_cmd_motor_stop(void)
 }
 
 
-/* 解析通道字符为 PID_Channel_t */
-static PID_Channel_t uart_parse_channel(char ch)
+/* 解析通道字符：
+ *  l/L → left
+ *  r/R → right
+ *  其他/默认 → both */
+static uint8_t uart_parse_channel(char ch)
 {
     switch (ch) {
-        case 'l': case 'L': return PID_CH_LEFT;
-        case 'r': case 'R': return PID_CH_RIGHT;
-        case 'b': case 'B': return PID_CH_BOTH;
-        default: return PID_CH_BOTH;  /* 默认两边 */
+        case 'l': case 'L': return 0;  /* left only */
+        case 'r': case 'R': return 1;  /* right only */
+        default:            return 2;  /* both */
     }
 }
 
@@ -151,31 +173,42 @@ static void uart_cmd_spid(const char *args)
         uart_printf(UART0, "Usage: spid <l|r|b> <kp> <ki> <kd>\r\n");
         return;
     }
-    
-    PID_Channel_t ch = uart_parse_channel(*p);
+
+    uint8_t ch = uart_parse_channel(*p);
     p = uart_find_next_arg(p);
-    
+
     if (*p == '\0') {
         uart_printf(UART0, "Usage: spid <l|r|b> <kp> <ki> <kd>\r\n");
         return;
     }
     float kp = uart_atof(p);
     p = uart_find_next_arg(p);
-    
+
     if (*p == '\0') {
         uart_printf(UART0, "Usage: spid <l|r|b> <kp> <ki> <kd>\r\n");
         return;
     }
     float ki = uart_atof(p);
     p = uart_find_next_arg(p);
-    
+
     if (*p == '\0') {
         uart_printf(UART0, "Usage: spid <l|r|b> <kp> <ki> <kd>\r\n");
         return;
     }
     float kd = uart_atof(p);
-    
-    speed_pid_set_param(ch, kp, ki, kd);
+
+    if (ch == 0 || ch == 2) {
+        speed_set_kp(&g_spd_left,  kp);
+        speed_set_ki(&g_spd_left,  ki);
+        speed_set_kd(&g_spd_left,  kd);
+        uart_printf(UART0, "OK L: kp=%5.3f ki=%5.3f kd=%5.3f\r\n", kp, ki, kd);
+    }
+    if (ch == 1 || ch == 2) {
+        speed_set_kp(&g_spd_right, kp);
+        speed_set_ki(&g_spd_right, ki);
+        speed_set_kd(&g_spd_right, kd);
+        uart_printf(UART0, "OK R: kp=%5.3f ki=%5.3f kd=%5.3f\r\n", kp, ki, kd);
+    }
 }
 
 /* 处理单独设置 kp 命令：skp <ch> <value> */
@@ -186,16 +219,24 @@ static void uart_cmd_skp(const char *args)
         uart_printf(UART0, "Usage: skp <l|r|b> <kp>\r\n");
         return;
     }
-    
-    PID_Channel_t ch = uart_parse_channel(*p);
+
+    uint8_t ch = uart_parse_channel(*p);
     p = uart_find_next_arg(p);
-    
+
     if (*p == '\0') {
         uart_printf(UART0, "Usage: skp <l|r|b> <kp>\r\n");
         return;
     }
     float kp = uart_atof(p);
-    speed_pid_set_kp(ch, kp);
+
+    if (ch == 0 || ch == 2) {
+        speed_set_kp(&g_spd_left, kp);
+        uart_printf(UART0, "OK L kp=%5.3f\r\n", kp);
+    }
+    if (ch == 1 || ch == 2) {
+        speed_set_kp(&g_spd_right, kp);
+        uart_printf(UART0, "OK R kp=%5.3f\r\n", kp);
+    }
 }
 
 /* 处理单独设置 ki 命令：ski <ch> <value> */
@@ -206,16 +247,24 @@ static void uart_cmd_ski(const char *args)
         uart_printf(UART0, "Usage: ski <l|r|b> <ki>\r\n");
         return;
     }
-    
-    PID_Channel_t ch = uart_parse_channel(*p);
+
+    uint8_t ch = uart_parse_channel(*p);
     p = uart_find_next_arg(p);
-    
+
     if (*p == '\0') {
         uart_printf(UART0, "Usage: ski <l|r|b> <ki>\r\n");
         return;
     }
     float ki = uart_atof(p);
-    speed_pid_set_ki(ch, ki);
+
+    if (ch == 0 || ch == 2) {
+        speed_set_ki(&g_spd_left, ki);
+        uart_printf(UART0, "OK L ki=%5.3f\r\n", ki);
+    }
+    if (ch == 1 || ch == 2) {
+        speed_set_ki(&g_spd_right, ki);
+        uart_printf(UART0, "OK R ki=%5.3f\r\n", ki);
+    }
 }
 
 /* 处理单独设置 kd 命令：skd <ch> <value> */
@@ -226,30 +275,45 @@ static void uart_cmd_skd(const char *args)
         uart_printf(UART0, "Usage: skd <l|r|b> <kd>\r\n");
         return;
     }
-    
-    PID_Channel_t ch = uart_parse_channel(*p);
+
+    uint8_t ch = uart_parse_channel(*p);
     p = uart_find_next_arg(p);
-    
+
     if (*p == '\0') {
         uart_printf(UART0, "Usage: skd <l|r|b> <kd>\r\n");
         return;
     }
     float kd = uart_atof(p);
-    speed_pid_set_kd(ch, kd);
+
+    if (ch == 0 || ch == 2) {
+        speed_set_kd(&g_spd_left, kd);
+        uart_printf(UART0, "OK L kd=%5.3f\r\n", kd);
+    }
+    if (ch == 1 || ch == 2) {
+        speed_set_kd(&g_spd_right, kd);
+        uart_printf(UART0, "OK R kd=%5.3f\r\n", kd);
+    }
 }
 
 /* 处理 PID 参数获取命令：gpid [ch] */
 static void uart_cmd_gpid(const char *args)
 {
     const char *p = uart_find_next_arg(args);  /* 跳过命令名 */
-    PID_Channel_t ch = PID_CH_BOTH;  /* 默认两边 */
-    
+    uint8_t ch = 2;  /* 默认两边 */
+
     if (*p != '\0') {
         ch = uart_parse_channel(*p);
     }
-    
+
     float kp, ki, kd;
-    speed_pid_get_param(ch, &kp, &ki, &kd);
+    if (ch == 0 || ch == 2) {
+        speed_get_params(&g_spd_left, &kp, &ki, &kd);
+        uart_printf(UART0, "PID L: kp=%5.3f ki=%5.3f kd=%5.3f\r\n", kp, ki, kd);
+    }
+    if (ch == 1 || ch == 2) {
+        speed_get_params(&g_spd_right, &kp, &ki, &kd);
+        uart_printf(UART0, "PID R: kp=%5.3f ki=%5.3f kd=%5.3f\r\n", kp, ki, kd);
+    }
 }
 
 /* 处理目标速度设置命令：starget <ch> <speed> */
@@ -260,30 +324,44 @@ static void uart_cmd_starget(const char *args)
         uart_printf(UART0, "Usage: starget <l|r|b> <speed>\r\n");
         return;
     }
-    
-    PID_Channel_t ch = uart_parse_channel(*p);
+
+    uint8_t ch = uart_parse_channel(*p);
     p = uart_find_next_arg(p);
-    
+
     if (*p == '\0') {
         uart_printf(UART0, "Usage: starget <l|r|b> <speed>\r\n");
         return;
     }
     float target = uart_atof(p);
-    
-    speed_pid_set_target(ch, target);
+
+    if (ch == 0 || ch == 2) {
+        speed_set_target(&g_spd_left, target);
+        uart_printf(UART0, "OK L target=%5.1f\r\n", target);
+    }
+    if (ch == 1 || ch == 2) {
+        speed_set_target(&g_spd_right, target);
+        uart_printf(UART0, "OK R target=%5.1f\r\n", target);
+    }
 }
 
 /* 处理当前速度获取命令：gspeed [ch] */
 static void uart_cmd_gspeed(const char *args)
 {
     const char *p = uart_find_next_arg(args);  /* 跳过命令名 */
-    PID_Channel_t ch = PID_CH_BOTH;  /* 默认两边 */
-    
+    uint8_t ch = 2;  /* 默认两边 */
+
     if (*p != '\0') {
         ch = uart_parse_channel(*p);
     }
-    
-    speed_pid_get_speed(ch);
+
+    if (ch == 0 || ch == 2) {
+        uart_printf(UART0, "Speed L: %5.1f (target: %5.1f)\r\n",
+                    g_spd_left.speed, g_spd_left.pid.setpoint);
+    }
+    if (ch == 1 || ch == 2) {
+        uart_printf(UART0, "Speed R: %5.1f (target: %5.1f)\r\n",
+                    g_spd_right.speed, g_spd_right.pid.setpoint);
+    }
 }
 
 /* ==================== 转向环命令 ==================== */
@@ -297,14 +375,14 @@ static void uart_cmd_stpid(const char *args)
     float kd = uart_atof(p);
 
     if (kp == 0.0f && ki == 0.0f && kd == 0.0f) {
-        /* 容错：若第一个数解析为 0 且后面没内容，提示用法 */
         const char *q = uart_find_next_arg(args);
         if (*q == '\0') {
             uart_printf(UART0, "Usage: stpid <kp> <ki> <kd>\r\n");
             return;
         }
     }
-    steer_pid_set_param(kp, ki, kd);
+    steer_set_param(kp, ki, kd);
+    uart_printf(UART0, "OK steer: kp=%5.3f ki=%5.3f kd=%5.3f\r\n", kp, ki, kd);
 }
 
 /* 单独设置转向环参数：stkp / stki / stkd <value> */
@@ -312,29 +390,38 @@ static void uart_cmd_stkp(const char *args)
 {
     const char *p = uart_find_next_arg(args);
     if (*p == '\0') { uart_printf(UART0, "Usage: stkp <kp>\r\n"); return; }
-    steer_pid_set_kp(uart_atof(p));
+    float kp = uart_atof(p);
+    steer_set_kp(kp);
+    uart_printf(UART0, "OK steer kp=%5.3f\r\n", kp);
 }
 
 static void uart_cmd_stki(const char *args)
 {
     const char *p = uart_find_next_arg(args);
     if (*p == '\0') { uart_printf(UART0, "Usage: stki <ki>\r\n"); return; }
-    steer_pid_set_ki(uart_atof(p));
+    float ki = uart_atof(p);
+    steer_set_ki(ki);
+    uart_printf(UART0, "OK steer ki=%5.3f\r\n", ki);
 }
 
 static void uart_cmd_stkd(const char *args)
 {
     const char *p = uart_find_next_arg(args);
     if (*p == '\0') { uart_printf(UART0, "Usage: stkd <kd>\r\n"); return; }
-    steer_pid_set_kd(uart_atof(p));
+    float kd = uart_atof(p);
+    steer_set_kd(kd);
+    uart_printf(UART0, "OK steer kd=%5.3f\r\n", kd);
 }
 
 /* 获取转向环参数：gtpid */
 static void uart_cmd_gtpid(const char *args)
 {
     (void)args;
-    float kp, ki, kd;
-    steer_pid_get_param(&kp, &ki, &kd);
+    float kp, ki, kd, base, mt;
+    steer_get_param(&kp, &ki, &kd, &base, &mt);
+    uart_printf(UART0,
+                "Steer PID: kp=%5.3f ki=%5.3f kd=%5.3f  base=%5.1f  max_turn=%5.1f\r\n",
+                kp, ki, kd, base, mt);
 }
 
 /* 查看循迹传感器实时状态：gpatrol */
@@ -357,7 +444,7 @@ static void uart_cmd_sbase(const char *args)
     const char *p = uart_find_next_arg(args);
     if (*p == '\0') { uart_printf(UART0, "Usage: sbase <counts_per_sec>\r\n"); return; }
     float spd = uart_atof(p);
-    steer_pid_set_base_speed(spd);
+    steer_set_base(spd);
     uart_printf(UART0, "OK steer base_speed=%5.1f cnt/s\r\n", spd);
 }
 
@@ -365,7 +452,7 @@ static void uart_cmd_sbase(const char *args)
 static void uart_cmd_sstop(const char *args)
 {
     (void)args;
-    steer_pid_stop();
+    steer_stop();
     uart_printf(UART0, "OK steer + speed stopped\r\n");
 }
 
@@ -382,6 +469,9 @@ static void uart_cmd_debug_speed_off(const char *args)
 {
     (void)args;
     debug_speed_only = 0;
+    /* 复位速度环 PID，防止调试模式下积累的积分带入正常模式 */
+    pid_reset(&g_spd_left.pid);
+    pid_reset(&g_spd_right.pid);
     uart_printf(UART0, "OK normal mode (patrol protection on)\r\n");
 }
 

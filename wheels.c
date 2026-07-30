@@ -48,6 +48,13 @@
 /* 外部变量：调试模式标志（定义在 gFunc.c） */
 extern volatile uint8_t debug_speed_only;
 
+/* 外部变量：控制周期标志（定义在 gFunc.c）
+ * steer_flag:   20ms (50Hz) 方向环 - 循迹读传感器 + 转向 PID
+ * speed_flag:   10ms (100Hz) 速度环 - 速度 PID → PWM 输出
+ * encoder_flag: 100ms 调试输出
+ * oled_flag:   100ms OLED 刷新
+ */
+
 // expect phenomenon: if four-way patrol not detect black, led0 on
 void patrol_test(void)
 {
@@ -131,43 +138,75 @@ int main(void)
     OLED_Clear();
     /* 初始化计时器（OLED 显示计时） - 必须在 OLED_Clear 之后 */
     timer_init();
-
-    uint32_t encoder_print_count = 0;
     
     while (1) {
         led_test();
-        // motor_test();
 
         /* 处理串口命令 */
         uart_cmd_process();
-        
-        /* 更新计时器 OLED 显示 */
-        timer_update();
-        
-        /* 控制周期：10ms 中断触发 */
-        if (read_patrol)
+
+        /* 100ms 周期：OLED 计时器刷新 */
+        if (oled_flag)
         {
-            read_patrol = 0;
+            oled_flag = 0;
+            timer_update();
+        }
 
-            /* === 速度环调试模式：跳过循迹保护和转向环 ===
-             * 直接使用 starget 命令设置的目标速度
-             * 注释掉循迹相关代码后，starget 命令设置的目标速度会一直保持
-             */
+        /* 20ms 周期 (50Hz): 方向环
+         * 读取循迹传感器 → 计算转向 PID → 设置左右轮目标速度
+         * 方向环独立于速度环运行，提供目标速度给速度环跟踪
+         */
+        // if (steer_flag)
+        // {
+        //     steer_flag = 0;
 
-            /* 3) 速度环：根据目标速度驱动 PWM 输出 */
-            pid_app_update(10);
-            
-            /* 调试输出：每 100ms 输出一次 */
-            encoder_print_count++;
-            if (encoder_print_count >= 10)
-            {
-                /* 诊断输出：包含 PID 内部状态 */
-                uart_printf(UART0, "D: sp=%6.1f spd=%8.1f out=%6d cnt=%10d\r\n",
-                            speed_left.pid.setpoint, speed_left.speed,
-                            (int)speed_left.pid.output, (int)encoder_left_count);
-                encoder_print_count = 0;
-            }
+        //     if (!debug_speed_only)
+        //     {
+        //         float error;
+        //         PatrolStatus_t st = patrol_get_error(&error);
 
+        //         /* 边界保护：丢线/路口停车 */
+        //         if (st == PATROL_LOST || st == PATROL_JUNCTION)
+        //         {
+        //             steer_stop();
+        //         }
+        //         else
+        //         {
+        //             steer_step(error, 20);
+        //         }
+        //     }
+        // }
+
+        /* 10ms 周期 (100Hz): 速度环
+         * 采样编码器增量 → 速度 PID → PWM 输出
+         */
+        if (speed_flag)
+        {
+            speed_flag = 0;
+            int32_t dl = encoder_sample_left();
+            int32_t dr = encoder_sample_right();
+            speed_update(&g_spd_left,  dl,  10.0f);
+            speed_update(&g_spd_right, dr, 10.0f);
+        }
+
+        /* 100ms 周期：调试输出
+         * 注意：auto_tune.py 解析 "D: %5.1f, %5.1f, %d, %10d" 格式
+         *   字段含义：[0] 左目标速度, [1] 左实测速度, [2] 左 PID 输出(PWM), [3] 左编码器增量 */
+        if (encoder_flag)
+        {
+            encoder_flag = 0;
+            float spd = g_spd_left.speed;
+            float err = g_spd_left.pid.setpoint - spd;
+            float derr = (err - g_spd_left.pid.last_error) / 0.01f;
+            float out = g_spd_left.pid.kp * err
+                      + g_spd_left.pid.ki * g_spd_left.pid.integral
+                      + g_spd_left.pid.kd * derr;
+            if (out >  (float)MOTOR_PWM_MAX_DUTY) out =  MOTOR_PWM_MAX_DUTY;
+            if (out < -(float)MOTOR_PWM_MAX_DUTY) out = -MOTOR_PWM_MAX_DUTY;
+
+            uart_printf(UART0, "D: %5.1f, %5.1f, %d, %10d\r\n",
+                        g_spd_left.pid.setpoint, spd,
+                        (int)out, (int)g_spd_left.last_delta);
         }
     }
 }
