@@ -53,11 +53,13 @@ float pid_step(PID_t *p, float setpoint, float measure, float dt)
 void speed_init(MotorSpeed_t *s, Motor_Channel_t ch,
                 float kp, float ki, float kd)
 {
-    s->ch            = ch;
-    s->speed         = 0.0f;
-    s->speed_raw     = 0.0f;
-    s->filter_alpha  = 0.3f;  /* 默认中等滤波 */
-    s->last_delta    = 0;
+    s->ch             = ch;
+    s->speed          = 0.0f;
+    s->speed_raw      = 0.0f;
+    s->filter_alpha   = 0.3f;  /* 默认中等滤波 */
+    s->motor_polarity = 1.0f;  /* 默认输出不翻转；若硬件BIN1/BIN2反接则设为-1.0 */
+    s->last_delta     = 0;
+    s->last_out       = 0.0f;
     pid_begin(&s->pid, kp, ki, kd,
               (float)MOTOR_PWM_MAX_DUTY,
               (float)MOTOR_PWM_MAX_DUTY * 0.5f);
@@ -71,8 +73,26 @@ void speed_set_filter(MotorSpeed_t *s, float alpha)
     s->filter_alpha = alpha;
 }
 
+/* 设置电机 PWM 输出极性：+1.0 正常, -1.0 翻转。
+ * 用于补偿硬件 BIN1/BIN2 交叉反接导致的方向与符号不一致。
+ * 修改时同步重置 PID，防止旧积分造成瞬态冲击。 */
+void speed_set_motor_polarity(MotorSpeed_t *s, float polarity)
+{
+    if (polarity >= 0.0f) s->motor_polarity =  1.0f;
+    else                  s->motor_polarity = -1.0f;
+    pid_reset(&s->pid);
+}
+
 void speed_set_target(MotorSpeed_t *s, float target)
 {
+    /* 目标速度符号变化（正↔负切换）时重置积分项。
+     * 原因：ki 较大时，正转积累的正积分在切换到负目标后释放极慢（约10秒），
+     *       期间积分项主导 PID 输出为正值，导致电机反常地正向满转。
+     *       重置后 PID 从纯 P 开始，方向立即正确。 */
+    if ((s->pid.setpoint > 0.0f && target < 0.0f) ||
+        (s->pid.setpoint < 0.0f && target > 0.0f)) {
+        pid_reset(&s->pid);
+    }
     s->pid.setpoint = target;
 }
 
@@ -120,10 +140,20 @@ void speed_update(MotorSpeed_t *s, int32_t delta, float dt_ms)
     s->last_delta = delta;
     float out = pid_step(&s->pid, s->pid.setpoint, s->speed, dt_ms / 1000.0f);
     s->last_out = out;
-    int16_t pwm;
-    if (out >  (float)MOTOR_PWM_MAX_DUTY) pwm =  MOTOR_PWM_MAX_DUTY;
-    else if (out < -(float)MOTOR_PWM_MAX_DUTY) pwm = -MOTOR_PWM_MAX_DUTY;
-    else                                  pwm = (int16_t)out;
+
+    /* 1) PID 输出硬限幅到 ±MOTOR_PWM_MAX_DUTY（±399） */
+    int16_t pwm_raw;
+    if (out >  (float)MOTOR_PWM_MAX_DUTY) pwm_raw =  MOTOR_PWM_MAX_DUTY;
+    else if (out < -(float)MOTOR_PWM_MAX_DUTY) pwm_raw = -MOTOR_PWM_MAX_DUTY;
+    else                                       pwm_raw = (int16_t)out;
+
+    /* 2) 应用电机输出极性（补偿硬件 BIN1/BIN2 交叉反接）
+     *    motor_polarity = +1.0 → 符号不变, -1.0 → 符号翻转 */
+    int16_t pwm = (int16_t)((float)pwm_raw * s->motor_polarity);
+
+    /* 3) 翻转后的安全限幅（理论上仍在范围内，防止浮点转换出现边缘偏差） */
+    if (pwm >  MOTOR_PWM_MAX_DUTY) pwm =  MOTOR_PWM_MAX_DUTY;
+    if (pwm < -MOTOR_PWM_MAX_DUTY) pwm = -MOTOR_PWM_MAX_DUTY;
     motor_set_speed(s->ch, pwm);
 }
 
@@ -219,9 +249,18 @@ void steer_stop(void)
 
 void pid_app_init(void)
 {
-    speed_init(&g_spd_left,  MOTOR_LEFT,  0.02f, 0.0f, 0.0f);
-    speed_init(&g_spd_right, MOTOR_RIGHT, 0.02f, 0.0f, 0.0f);
+    speed_init(&g_spd_left,  MOTOR_LEFT,  0.3f, 0.191f, 0.0f);
+    speed_init(&g_spd_right, MOTOR_RIGHT, 0.3f, 0.191f, 0.0f);
+
+    /* 补偿右轮 TB6612 的 BIN1/BIN2 硬件交叉反接。
+     * 现象：speed_set_target(RIGHT, -4000) 本应反转，实际满速正转（正反馈饱和）。
+     * 根因：BIN1/BIN2 引脚实际接线与 SysConfig 宏定义交叉，
+     *       导致 software backward 设置 → hardware 正转，继而形成正反馈发散。
+     * 修复：右轮 PWM 输出乘以 -1.0，使软件语义（正PWM=前进, 负PWM=后退）
+     *       与实际物理方向重新对齐，闭环恢复负反馈。 */
+    speed_set_motor_polarity(&g_spd_right, 1.0f);
+
     steer_init(400.0f, 0.0f, 0.0f, 2000.0f);
     uart_printf(UART0,
-                "Speed: kp=0.020 ki=0 kd=0 | Steer: kp=400 max_turn=2000\r\n");
+                "Speed: L(kp=0.130 pol=+1) R(kp=0.020 pol=-1) | Steer: kp=400 max_turn=2000\r\n");
 }

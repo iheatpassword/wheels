@@ -165,34 +165,67 @@ static uint8_t uart_parse_channel(char ch)
     }
 }
 
-/* 处理 PID 参数设置命令：spid <ch> <kp> <ki> <kd> */
+/* 智能解析通道（可省略，默认 both），并移动指针 *pp 到下一 token 开始。
+ * 识别规则：
+ *   若当前 token 是单字符 (l/L/r/R/b/B) 后跟分隔符或结尾 → 按通道消费该 token；
+ *   若当前 token 以数字/'-'/'.' 等数值字符开头 → 视为省略了通道（默认 both），
+ *     不消费该 token，*pp 保持指向数值首字符，后续 uart_atof/uart_atoi 正常解析负数。
+ * 这样输入 "starget -4000" 与 "starget r -4000" 都能正确解析。 */
+static void uart_try_parse_channel(const char **pp, uint8_t *ch_out)
+{
+    const char *p = *pp;
+    /* 跳过前导空白（调用方通常已跳过，防御性处理） */
+    while (*p == ' ' || *p == '\t') p++;
+
+    char c = *p;
+    /* 合法单通道：c ∈ {l,r,b} 且 下一个字符是空白或 '\0' */
+    if ((c == 'l' || c == 'L' || c == 'r' || c == 'R' ||
+         c == 'b' || c == 'B') &&
+        (p[1] == ' ' || p[1] == '\t' || p[1] == '\0')) {
+        uint8_t ch;
+        switch (c) {
+            case 'l': case 'L': ch = 0; break;
+            case 'r': case 'R': ch = 1; break;
+            default:            ch = 2; break;
+        }
+        *ch_out = ch;
+        p++;                                   /* 消费通道字符 */
+        while (*p == ' ' || *p == '\t') p++;   /* 消费空白，指向下一 token */
+        *pp = p;
+        return;
+    }
+    /* 否则默认 both，且不移动指针（保留数值 token） */
+    *ch_out = 2;
+}
+
+/* 处理 PID 参数设置命令：spid [ch] <kp> <ki> <kd>  (ch可省略，默认both) */
 static void uart_cmd_spid(const char *args)
 {
     const char *p = uart_find_next_arg(args);  /* 跳过命令名 */
     if (*p == '\0') {
-        uart_printf(UART0, "Usage: spid <l|r|b> <kp> <ki> <kd>\r\n");
+        uart_printf(UART0, "Usage: spid [l|r|b] <kp> <ki> <kd>\r\n");
         return;
     }
 
-    uint8_t ch = uart_parse_channel(*p);
-    p = uart_find_next_arg(p);
+    uint8_t ch;
+    uart_try_parse_channel(&p, &ch);
 
     if (*p == '\0') {
-        uart_printf(UART0, "Usage: spid <l|r|b> <kp> <ki> <kd>\r\n");
+        uart_printf(UART0, "Usage: spid [l|r|b] <kp> <ki> <kd>\r\n");
         return;
     }
     float kp = uart_atof(p);
     p = uart_find_next_arg(p);
 
     if (*p == '\0') {
-        uart_printf(UART0, "Usage: spid <l|r|b> <kp> <ki> <kd>\r\n");
+        uart_printf(UART0, "Usage: spid [l|r|b] <kp> <ki> <kd>\r\n");
         return;
     }
     float ki = uart_atof(p);
     p = uart_find_next_arg(p);
 
     if (*p == '\0') {
-        uart_printf(UART0, "Usage: spid <l|r|b> <kp> <ki> <kd>\r\n");
+        uart_printf(UART0, "Usage: spid [l|r|b] <kp> <ki> <kd>\r\n");
         return;
     }
     float kd = uart_atof(p);
@@ -211,20 +244,20 @@ static void uart_cmd_spid(const char *args)
     }
 }
 
-/* 处理单独设置 kp 命令：skp <ch> <value> */
+/* 处理单独设置 kp 命令：skp [ch] <value>  (ch可省略，默认both) */
 static void uart_cmd_skp(const char *args)
 {
     const char *p = uart_find_next_arg(args);
     if (*p == '\0') {
-        uart_printf(UART0, "Usage: skp <l|r|b> <kp>\r\n");
+        uart_printf(UART0, "Usage: skp [l|r|b] <kp>\r\n");
         return;
     }
 
-    uint8_t ch = uart_parse_channel(*p);
-    p = uart_find_next_arg(p);
+    uint8_t ch;
+    uart_try_parse_channel(&p, &ch);
 
     if (*p == '\0') {
-        uart_printf(UART0, "Usage: skp <l|r|b> <kp>\r\n");
+        uart_printf(UART0, "Usage: skp [l|r|b] <kp>\r\n");
         return;
     }
     float kp = uart_atof(p);
@@ -239,20 +272,20 @@ static void uart_cmd_skp(const char *args)
     }
 }
 
-/* 处理单独设置 ki 命令：ski <ch> <value> */
+/* 处理单独设置 ki 命令：ski [ch] <value>  (ch可省略，默认both) */
 static void uart_cmd_ski(const char *args)
 {
     const char *p = uart_find_next_arg(args);
     if (*p == '\0') {
-        uart_printf(UART0, "Usage: ski <l|r|b> <ki>\r\n");
+        uart_printf(UART0, "Usage: ski [l|r|b] <ki>\r\n");
         return;
     }
 
-    uint8_t ch = uart_parse_channel(*p);
-    p = uart_find_next_arg(p);
+    uint8_t ch;
+    uart_try_parse_channel(&p, &ch);
 
     if (*p == '\0') {
-        uart_printf(UART0, "Usage: ski <l|r|b> <ki>\r\n");
+        uart_printf(UART0, "Usage: ski [l|r|b] <ki>\r\n");
         return;
     }
     float ki = uart_atof(p);
@@ -267,20 +300,20 @@ static void uart_cmd_ski(const char *args)
     }
 }
 
-/* 处理单独设置 kd 命令：skd <ch> <value> */
+/* 处理单独设置 kd 命令：skd [ch] <value>  (ch可省略，默认both) */
 static void uart_cmd_skd(const char *args)
 {
     const char *p = uart_find_next_arg(args);
     if (*p == '\0') {
-        uart_printf(UART0, "Usage: skd <l|r|b> <kd>\r\n");
+        uart_printf(UART0, "Usage: skd [l|r|b] <kd>\r\n");
         return;
     }
 
-    uint8_t ch = uart_parse_channel(*p);
-    p = uart_find_next_arg(p);
+    uint8_t ch;
+    uart_try_parse_channel(&p, &ch);
 
     if (*p == '\0') {
-        uart_printf(UART0, "Usage: skd <l|r|b> <kd>\r\n");
+        uart_printf(UART0, "Usage: skd [l|r|b] <kd>\r\n");
         return;
     }
     float kd = uart_atof(p);
@@ -295,21 +328,21 @@ static void uart_cmd_skd(const char *args)
     }
 }
 
-/* 设置速度环滤波系数：sfilter <ch> <alpha>
+/* 设置速度环滤波系数：sfilter [ch] <alpha>  (ch可省略，默认both)
  * alpha: 1=无滤波, 0.5=中等, 0.1=强滤波 */
 static void uart_cmd_sfilter(const char *args)
 {
     const char *p = uart_find_next_arg(args);
     if (*p == '\0') {
-        uart_printf(UART0, "Usage: sfilter <l|r|b> <alpha>\r\n");
+        uart_printf(UART0, "Usage: sfilter [l|r|b] <alpha>\r\n");
         return;
     }
 
-    uint8_t ch = uart_parse_channel(*p);
-    p = uart_find_next_arg(p);
+    uint8_t ch;
+    uart_try_parse_channel(&p, &ch);
 
     if (*p == '\0') {
-        uart_printf(UART0, "Usage: sfilter <l|r|b> <alpha>\r\n");
+        uart_printf(UART0, "Usage: sfilter [l|r|b] <alpha>\r\n");
         return;
     }
     float alpha = uart_atof(p);
@@ -324,14 +357,14 @@ static void uart_cmd_sfilter(const char *args)
     }
 }
 
-/* 处理 PID 参数获取命令：gpid [ch] */
+/* 处理 PID 参数获取命令：gpid [ch]  (ch可省略，默认both) */
 static void uart_cmd_gpid(const char *args)
 {
     const char *p = uart_find_next_arg(args);  /* 跳过命令名 */
     uint8_t ch = 2;  /* 默认两边 */
 
     if (*p != '\0') {
-        ch = uart_parse_channel(*p);
+        uart_try_parse_channel(&p, &ch);
     }
 
     float kp, ki, kd;
@@ -345,20 +378,20 @@ static void uart_cmd_gpid(const char *args)
     }
 }
 
-/* 处理目标速度设置命令：starget <ch> <speed> */
+/* 处理目标速度设置命令：starget [ch] <speed>  (ch可省略，默认both) */
 static void uart_cmd_starget(const char *args)
 {
     const char *p = uart_find_next_arg(args);  /* 跳过命令名 */
     if (*p == '\0') {
-        uart_printf(UART0, "Usage: starget <l|r|b> <speed>\r\n");
+        uart_printf(UART0, "Usage: starget [l|r|b] <speed>\r\n");
         return;
     }
 
-    uint8_t ch = uart_parse_channel(*p);
-    p = uart_find_next_arg(p);
+    uint8_t ch;
+    uart_try_parse_channel(&p, &ch);
 
     if (*p == '\0') {
-        uart_printf(UART0, "Usage: starget <l|r|b> <speed>\r\n");
+        uart_printf(UART0, "Usage: starget [l|r|b] <speed>\r\n");
         return;
     }
     float target = uart_atof(p);
@@ -373,14 +406,14 @@ static void uart_cmd_starget(const char *args)
     }
 }
 
-/* 处理当前速度获取命令：gspeed [ch] */
+/* 处理当前速度获取命令：gspeed [ch]  (ch可省略，默认both) */
 static void uart_cmd_gspeed(const char *args)
 {
     const char *p = uart_find_next_arg(args);  /* 跳过命令名 */
     uint8_t ch = 2;  /* 默认两边 */
 
     if (*p != '\0') {
-        ch = uart_parse_channel(*p);
+        uart_try_parse_channel(&p, &ch);
     }
 
     if (ch == 0 || ch == 2) {
@@ -485,27 +518,6 @@ static void uart_cmd_sstop(const char *args)
     uart_printf(UART0, "OK steer + speed stopped\r\n");
 }
 
-/* 启动电机方向反转测试：mdtest <speed>
- * speed: 目标速度 (counts/s)，每 2 秒翻转一次方向 */
-static void uart_cmd_mdtest_start(const char *args)
-{
-    const char *p = uart_find_next_arg(args);
-    if (*p == '\0') {
-        uart_printf(UART0, "Usage: mdtest <speed>\r\n");
-        uart_printf(UART0, "  speed: target speed in counts/s (e.g. 500)\r\n");
-        return;
-    }
-    float speed = uart_atof(p);
-    motor_dir_test_start(speed);
-}
-
-/* 停止电机方向反转测试：mdtest_stop */
-static void uart_cmd_mdtest_stop(const char *args)
-{
-    (void)args;
-    motor_dir_test_stop();
-}
-
 /* 启用调试模式：仅速度环（禁用循迹保护） */
 static void uart_cmd_debug_speed_only(const char *args)
 {
@@ -571,13 +583,13 @@ static void uart_cmd_help(void)
     uart_printf(UART0, "  mstop              - Stop motors\r\n");
     uart_printf(UART0, "\r\n");
     uart_printf(UART0, "Speed Loop PID:\r\n");
-    uart_printf(UART0, "  spid <ch> <kp> <ki> <kd>  - Set all PID params\r\n");
-    uart_printf(UART0, "  skp <ch> <kp>             - Set kp only\r\n");
-    uart_printf(UART0, "  ski <ch> <ki>             - Set ki only\r\n");
-    uart_printf(UART0, "  skd <ch> <kd>             - Set kd only\r\n");
-    uart_printf(UART0, "  sfilter <ch> <alpha>      - Set speed filter (0=strong, 1=none)\r\n");
+    uart_printf(UART0, "  spid [ch] <kp> <ki> <kd>  - Set all PID params (ch default both)\r\n");
+    uart_printf(UART0, "  skp [ch] <kp>             - Set kp only\r\n");
+    uart_printf(UART0, "  ski [ch] <ki>             - Set ki only\r\n");
+    uart_printf(UART0, "  skd [ch] <kd>             - Set kd only\r\n");
+    uart_printf(UART0, "  sfilter [ch] <alpha>      - Set speed filter (0=strong, 1=none)\r\n");
     uart_printf(UART0, "  gpid [ch]                 - Get speed PID params\r\n");
-    uart_printf(UART0, "  starget <ch> <speed>      - Set target speed (cnt/s)\r\n");
+    uart_printf(UART0, "  starget [ch] <speed>      - Set target speed (cnt/s, negative=reverse)\r\n");
     uart_printf(UART0, "  gspeed [ch]               - Get current speed\r\n");
     uart_printf(UART0, "\r\n");
     uart_printf(UART0, "Steer PID (Patrol Error Loop):\r\n");
@@ -639,14 +651,6 @@ void uart_cmd_process(void)
                (cmd[7] == ' ' || cmd[7] == '\t' || cmd[7] == '\0')) {
         /* sfilter <ch> <alpha> */
         uart_cmd_sfilter(cmd);
-    } else if (cmd[0] == 'm' && cmd[1] == 'd' && cmd[2] == 't' && cmd[3] == 'e' && cmd[4] == 's' && cmd[5] == 't' &&
-               (cmd[6] == ' ' || cmd[6] == '\t' || cmd[6] == '\0')) {
-        /* mdtest <speed> */
-        uart_cmd_mdtest_start(cmd);
-    } else if (cmd[0] == 'm' && cmd[1] == 'd' && cmd[2] == 't' && cmd[3] == 'e' && cmd[4] == 's' && cmd[5] == 't' && cmd[6] == '_' && cmd[7] == 's' && cmd[8] == 't' && cmd[9] == 'o' && cmd[10] == 'p' &&
-               (cmd[11] == ' ' || cmd[11] == '\t' || cmd[11] == '\0')) {
-        /* mdtest_stop */
-        uart_cmd_mdtest_stop(cmd);
     } else if (cmd[0] == 'g' && cmd[1] == 'p' && cmd[2] == 'i' && cmd[3] == 'd' &&
                (cmd[4] == ' ' || cmd[4] == '\t' || cmd[4] == '\0')) {
         /* gpid [ch] */

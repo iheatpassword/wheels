@@ -33,6 +33,7 @@ typedef struct {
     float  speed;          /* 滤波后的速度（用于 PID 反馈） */
     float  speed_raw;      /* 原始未经滤波的速度（用于调试） */
     float  filter_alpha;   /* 低通系数：1=无滤波, 0.5=中等, 0.1=强滤波 */
+    float  motor_polarity; /* PWM 输出极性：+1.0 正常, -1.0 翻转（补偿硬件 BIN1/BIN2 反接） */
     int32_t last_delta;
     float  last_out;       /* speed_update 最近一次实际输出（限幅后，下发 PWM 前） */
 } MotorSpeed_t;
@@ -66,6 +67,7 @@ void  speed_set_kp(MotorSpeed_t *s, float kp);
 void  speed_set_ki(MotorSpeed_t *s, float ki);
 void  speed_set_kd(MotorSpeed_t *s, float kd);
 void  speed_set_filter(MotorSpeed_t *s, float alpha);
+void  speed_set_motor_polarity(MotorSpeed_t *s, float polarity);
 void  speed_get_params(MotorSpeed_t *s, float *kp, float *ki, float *kd);
 float speed_get_speed(MotorSpeed_t *s);
 void  speed_update(MotorSpeed_t *s, int32_t delta, float dt_ms);

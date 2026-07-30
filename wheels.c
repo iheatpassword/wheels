@@ -124,21 +124,27 @@ int main(void)
 
     motor_init();
     encoder_init();
-    MPU6050_Init();
-    OLED_Init();
+    // MPU6050_Init();
+    // OLED_Init();
 
     Interrupt_Init();
-    OLED_ShowString(0,0,(uint8_t *)"initing...",8);    
-    wait_for_mpu6050();
+    // OLED_ShowString(0,0,(uint8_t *)"initing...",8);    
+    // wait_for_mpu6050();
 
-    /* 初始化速度闭环 PID 控制（左右电机） */
+    // /* 初始化速度闭环 PID 控制（左右电机） */
     pid_app_init();
-    /* 初始化循迹模块（加权偏差模式） */
+    // /* 初始化循迹模块（加权偏差模式） */
     patrol_init();
-    OLED_Clear();
-    /* 初始化计时器（OLED 显示计时） - 必须在 OLED_Clear 之后 */
-    timer_init();
+    // OLED_Clear();
+    // /* 初始化计时器（OLED 显示计时） - 必须在 OLED_Clear 之后 */
+    // timer_init();
+
+    // speed_set_target(&g_spd_left, -1000);
+    // speed_set_target(&g_spd_right, -4000);
+    // motor_set_speed(MOTOR_RIGHT, 200);
+    // motor_set_speed(MOTOR_LEFT, 200);
     
+
     while (1) {
         led_test();
         // motor_test();
@@ -146,36 +152,36 @@ int main(void)
         uart_cmd_process();
 
         /* 100ms 周期：OLED 计时器刷新 */
-        if (oled_flag)
-        {
-            oled_flag = 0;
-            timer_update();
-        }
+        // if (oled_flag)
+        // {
+        //     oled_flag = 0;
+        //     timer_update();
+        // }
 
         /* 20ms 周期 (50Hz): 方向环
          * 读取循迹传感器 → 计算转向 PID → 设置左右轮目标速度
          * 方向环独立于速度环运行，提供目标速度给速度环跟踪
          */
-        if (steer_flag)
-        {
-            steer_flag = 0;
+        // if (steer_flag)
+        // {
+        //     steer_flag = 0;
 
-            if (!debug_speed_only)
-            {
-                float error;
-                PatrolStatus_t st = patrol_get_error(&error);
+        //     if (!debug_speed_only)
+        //     {
+        //         float error;
+        //         PatrolStatus_t st = patrol_get_error(&error);
 
-                /* 边界保护：丢线/路口停车 */
-                if (st == PATROL_LOST || st == PATROL_JUNCTION)
-                {
-                    steer_stop();
-                }
-                else
-                {
-                    steer_step(error, 20);
-                }
-            }
-        }
+        //         /* 边界保护：丢线/路口停车 */
+        //         if (st == PATROL_LOST || st == PATROL_JUNCTION)
+        //         {
+        //             steer_stop();
+        //         }
+        //         else
+        //         {
+        //             steer_step(error, 20);
+        //         }
+        //     }
+        // }
 
         /* 10ms 周期 (100Hz): 速度环 + 调试输出
          * 采样编码器增量（打时间戳）→ 真实 dt 算速度 → PID → PWM → 调试串口
@@ -188,17 +194,24 @@ int main(void)
             float dtl = 0.0f, dtr = 0.0f;
             int32_t dl = encoder_sample_left(&dtl);
             int32_t dr = encoder_sample_right(&dtr);
-            if (dtl > 0.0f) speed_update(&g_spd_left,  dl, dtl);
-            if (dtr > 0.0f) speed_update(&g_spd_right, dr, dtr);
-
-            /* 电机方向反转测试更新（如果激活） */
-            motor_dir_test_update();
+            uart_printf(UART0,"d: %d,%d\r\n",dl,dr);
+            /* dt=0 表示首次采样，无基准，跳过本次 PID */
+            if (dtl > 0.0f) {
+                speed_update(&g_spd_left,  dl, dtl);
+            }
+            if (dtr > 0.0f) {
+                speed_update(&g_spd_right, dr, dtr);
+            }
 
             /* 文本调试输出：auto_tune.py 解析 "D: %5.1f, %5.1f, %d, %10d" 格式
-             * 字段：[0]左目标速度 [1]左实测速度 [2]左PID输出(PWM) [3]左编码器增量 */
-            uart_printf(UART0, "D: %5.1f, %5.1f, %d, %10d\r\n",
-                        g_spd_left.pid.setpoint, g_spd_left.speed,
-                        (int)g_spd_left.last_out, (int)g_spd_left.last_delta);           
+             * 字段：[0]目标速度 [1]实测速度 [2]PID输出(PWM) [3]编码器增量
+             * DL 左轮，DR 右轮；保留原 "D:" 前缀兼容旧脚本（内容与 DL 相同） */
+            // uart_printf(UART0, "DL: %5.1f, %5.1f, %d, %10d\r\n",
+            //             g_spd_left.pid.setpoint, g_spd_left.speed,
+            //             (int)g_spd_left.last_out, (int)g_spd_left.last_delta);
+            // uart_printf(UART0, "DR: %5.1f, %5.1f, %d, %10d\r\n",
+            //             g_spd_right.pid.setpoint, g_spd_right.speed,
+            //             (int)g_spd_right.last_out, (int)g_spd_right.last_delta);
         }
     }
 }
