@@ -3,6 +3,7 @@
 #include "uart.h"
 #include "clock.h"
 #include "App/pid.h"
+#include "App/patrol.h"
 
 /* 10ms 中断标志，由 TIMER_0 中断设置，主循环清除 */
 volatile uint8_t read_patrol = 0;
@@ -332,28 +333,21 @@ static void uart_cmd_gtpid(const char *args)
     steer_pid_get_param(&kp, &ki, &kd);
 }
 
-/* 设置目标航向角：syaw <degrees> */
-static void uart_cmd_syaw(const char *args)
+/* 查看循迹传感器实时状态：gpatrol */
+static void uart_cmd_gpatrol(const char *args)
 {
-    const char *p = uart_find_next_arg(args);
-    if (*p == '\0') { uart_printf(UART0, "Usage: syaw <degrees>\r\n"); return; }
-    float yaw = uart_atof(p);
-    steer_pid_set_target_yaw(yaw);
-    uart_printf(UART0, "OK steer target_yaw=%5.1fdeg\r\n", yaw);
+    (void)args;
+    uint8_t r2, r1, l1, l2;
+    patrol_get_raw(&r2, &r1, &l1, &l2);
+    float err = 0.0f;
+    PatrolStatus_t st = patrol_get_error(&err);
+    const char *sname = (st == PATROL_OK) ? "OK"
+                      : (st == PATROL_LOST) ? "LOST" : "JUNCTION";
+    uart_printf(UART0, "pat[%d%d%d%d] %s err=%+4.2f  (r2=-3 r1=-1 l1=+1 l2=+3)\r\n",
+                r2, r1, l1, l2, sname, err);
 }
 
-/* 微调目标航向角：yadj <delta_degrees>（正数右转，负数左转） */
-static void uart_cmd_yadj(const char *args)
-{
-    const char *p = uart_find_next_arg(args);
-    if (*p == '\0') { uart_printf(UART0, "Usage: yadj <delta_degrees>\r\n"); return; }
-    float delta = uart_atof(p);
-    steer_pid_adjust_yaw(delta);
-    uart_printf(UART0, "OK steer adjust %+5.1fdeg  now target=%5.1fdeg\r\n",
-                delta, steer_control.target_yaw);
-}
-
-/* 设置基础前进速度：sbase <counts/s>（0=原地转向） */
+/* 设置基础前进速度：sbase <counts/s>（0=原地/停车） */
 static void uart_cmd_sbase(const char *args)
 {
     const char *p = uart_find_next_arg(args);
@@ -361,15 +355,6 @@ static void uart_cmd_sbase(const char *args)
     float spd = uart_atof(p);
     steer_pid_set_base_speed(spd);
     uart_printf(UART0, "OK steer base_speed=%5.1f cnt/s\r\n", spd);
-}
-
-/* 重置当前航向为 0 度基准：yaw0 */
-static void uart_cmd_yaw0(const char *args)
-{
-    (void)args;
-    extern float yaw;
-    steer_pid_reset_yaw_zero(yaw);
-    uart_printf(UART0, "OK steer yaw reset: current=%5.1fdeg set to 0 baseline\r\n", yaw);
 }
 
 /* 停止转向控制：sstop（同时停止转向环和速度环） */
@@ -397,16 +382,14 @@ static void uart_cmd_help(void)
     uart_printf(UART0, "  starget <ch> <speed>      - Set target speed (cnt/s)\r\n");
     uart_printf(UART0, "  gspeed [ch]               - Get current speed\r\n");
     uart_printf(UART0, "\r\n");
-    uart_printf(UART0, "Steer / Yaw PID (Heading Loop):\r\n");
+    uart_printf(UART0, "Steer PID (Patrol Error Loop):\r\n");
     uart_printf(UART0, "  stpid <kp> <ki> <kd>      - Set steer PID params\r\n");
     uart_printf(UART0, "  stkp <kp>                 - Set steer kp\r\n");
     uart_printf(UART0, "  stki <ki>                 - Set steer ki\r\n");
     uart_printf(UART0, "  stkd <kd>                 - Set steer kd\r\n");
     uart_printf(UART0, "  gtpid                     - Get steer PID params\r\n");
-    uart_printf(UART0, "  syaw <deg>                - Set target heading (deg)\r\n");
-    uart_printf(UART0, "  yadj <deg>                - Adjust heading +/-deg (pos=turn right)\r\n");
-    uart_printf(UART0, "  yaw0                      - Reset current yaw to 0 baseline\r\n");
-    uart_printf(UART0, "  sbase <cnt/s>             - Set base forward speed (0=in-place turn)\r\n");
+    uart_printf(UART0, "  gpatrol                   - Show patrol sensors + error\r\n");
+    uart_printf(UART0, "  sbase <cnt/s>             - Set base forward speed (0=stop)\r\n");
     uart_printf(UART0, "  sstop                     - Stop steer + speed loop\r\n");
     uart_printf(UART0, "\r\n");
     uart_printf(UART0, "  ch: l=left, r=right, b=both (default)\r\n");
@@ -481,18 +464,11 @@ void uart_cmd_process(void)
                (cmd[5] == ' ' || cmd[5] == '\t' || cmd[5] == '\0')) {
         /* gtpid */
         uart_cmd_gtpid(cmd);
-    } else if (cmd[0] == 's' && cmd[1] == 'y' && cmd[2] == 'a' && cmd[3] == 'w' &&
-               (cmd[4] == ' ' || cmd[4] == '\t' || cmd[4] == '\0')) {
-        /* syaw <deg> */
-        uart_cmd_syaw(cmd);
-    } else if (cmd[0] == 'y' && cmd[1] == 'a' && cmd[2] == 'd' && cmd[3] == 'j' &&
-               (cmd[4] == ' ' || cmd[4] == '\t' || cmd[4] == '\0')) {
-        /* yadj <deg> */
-        uart_cmd_yadj(cmd);
-    } else if (cmd[0] == 'y' && cmd[1] == 'a' && cmd[2] == 'w' && cmd[3] == '0' &&
-               (cmd[4] == ' ' || cmd[4] == '\t' || cmd[4] == '\0')) {
-        /* yaw0 */
-        uart_cmd_yaw0(cmd);
+    } else if (cmd[0] == 'g' && cmd[1] == 'p' && cmd[2] == 'a' && cmd[3] == 't' && cmd[4] == 'r' &&
+               cmd[5] == 'o' && cmd[6] == 'l' &&
+               (cmd[7] == ' ' || cmd[7] == '\t' || cmd[7] == '\0')) {
+        /* gpatrol */
+        uart_cmd_gpatrol(cmd);
     } else if (cmd[0] == 's' && cmd[1] == 'b' && cmd[2] == 'a' && cmd[3] == 's' && cmd[4] == 'e' &&
                (cmd[5] == ' ' || cmd[5] == '\t' || cmd[5] == '\0')) {
         /* sbase <cnt/s> */

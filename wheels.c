@@ -122,14 +122,9 @@ int main(void)
 
     /* 初始化速度闭环 PID 控制（左右电机） */
     pid_app_init();
+    /* 初始化循迹模块（加权偏差模式） */
+    patrol_init();
     OLED_Clear();
-
-    /* 初始化航向：以通电时 MPU6050 的 yaw 为 0 度基准
-     * 注意：MPU6050_Init + wait_for_mpu6050 后 yaw 已可读取；
-     *       若航向角漂移较大，可随时通过串口命令 yaw0 重置基准 */
-    extern float yaw;
-    Read_Quad();  /* 先触发一次读取，确保 yaw 更新 */
-    steer_pid_reset_yaw_zero(yaw);
 
     uint32_t encoder_print_count = 0;
     
@@ -145,16 +140,22 @@ int main(void)
         {
             read_patrol = 0;
 
-            /* 读取 MPU6050 航向角（DMP 每 10ms 读取一次） */
-            Read_Quad();
+            /* 1) 循迹：读取 4 路传感器，计算加权偏差 */
+            float position_error = 0.0f;
+            PatrolStatus_t pat_status = patrol_get_error(&position_error);
 
-            /* 1) 转向环：根据 yaw 误差，输出差速补偿
-             *    steer_pid_update 内部会调用 speed_control_set 设置左右轮目标速度 */
-            steer_pid_update(yaw, 10);
+            /* 2) 转向环：根据偏差输出差速，设置左右轮目标速度
+             *    边界处理：丢线(LOST)/路口(JUNCTION) → 停车 */
+            if (pat_status == PATROL_OK) {
+                steer_pid_update(position_error, 10);
+            } else {
+                /* 丢线或全黑路口：目标速度置 0（速度环会自然减速停车） */
+                speed_control_set(&speed_left, 0.0f);
+                speed_control_set(&speed_right, 0.0f);
+                steer_control.turn_output = 0.0f;
+            }
 
-            /* 2) 速度环：根据目标速度，驱动 PWM 输出
-             *    注意：steer_pid_update 已经写好了左右轮 setpoint，
-             *    pid_app_update 只是驱动速度闭环执行 PWM 更新 */
+            /* 3) 速度环：根据目标速度驱动 PWM 输出 */
             pid_app_update(10);
             
             /* 调试输出：每 100ms 输出一次 */
@@ -163,9 +164,13 @@ int main(void)
             {
                 float l_speed, r_speed;
                 speed_pid_get_raw_speed(&l_speed, &r_speed);
-                uart_printf(UART0, "enc: l_encoder=%6.1f, r_encoder=%6.1f  yaw=%5.1f  turn=%6.1f  base=%5.1f\n",
-                            l_speed, r_speed, yaw,
-                            steer_control.turn_output, steer_control.base_speed);
+                uint8_t r2, r1, l1, l2;
+                patrol_get_raw(&r2, &r1, &l1, &l2);
+                const char *st = (pat_status == PATROL_OK) ? "OK"
+                               : (pat_status == PATROL_LOST) ? "LOST" : "JCT";
+                uart_printf(UART0, "enc: L=%6.1f R=%6.1f | pat[%d%d%d%d] %s err=%+4.2f turn=%+6.1f base=%5.1f\n",
+                            l_speed, r_speed, r2, r1, l1, l2, st,
+                            position_error, steer_control.turn_output, steer_control.base_speed);
                 encoder_print_count = 0;
             }
 

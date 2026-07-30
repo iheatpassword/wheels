@@ -286,14 +286,16 @@ void pid_app_init(void)
     speed_left.polarity  = -1.0f;
     speed_right.polarity = +1.0f;
 
-    /* 转向环初始化（保守参数，安全起步）
-     * kp=20: 每度误差输出 20 脉冲/秒差速（例：误差 10° → 差速 200）
+    /* 转向环初始化（循迹偏差驱动，保守参数安全起步）
+     * 偏差范围 [-3, +3]（加权平均后）
+     * kp=400: 每单位偏差输出 400 脉冲/秒差速
+     *         例：偏差 +3（车偏左）→ 差速 +1200 → 左轮快右轮慢 → 右转修正
      * ki=0, kd=0: 先只用 P 项，防止震荡
-     * max_turn=2000: 最大差速 2000 脉冲/秒（约满转的 25%） */
-    steer_pid_init(20.0f, 0.0f, 0.0f, 2000.0f);
+     * max_turn=2000: 最大差速 2000 脉冲/秒 */
+    steer_pid_init(400.0f, 0.0f, 0.0f, 2000.0f);
 
     uart_printf(UART0, "Speed PID init: L(kp=0.346 ki=0 kd=0) R(kp=0.346 ki=0 kd=0)\r\n");
-    uart_printf(UART0, "Steer PID init: kp=20 ki=0 kd=0  max_turn=2000\r\n");
+    uart_printf(UART0, "Steer PID init: kp=400 ki=0 kd=0  max_turn=2000 (patrol error mode)\r\n");
 }
 
 void pid_app_update(uint32_t dt_ms)
@@ -303,7 +305,7 @@ void pid_app_update(uint32_t dt_ms)
     speed_control_update(&speed_right, dt);
 }
 
-/* ================ 转向环（航向控制） ================ */
+/* ================ 转向环（循迹偏差控制） ================ */
 
 Steer_Control_t steer_control;
 
@@ -314,31 +316,18 @@ static float calc_steer_integral_limit(float ki, float output_max)
     return 1000.0f;
 }
 
-/* 角度归一化：将误差限制在 (-180, 180]，避免走 350° 到 10° 绕大圈 */
-static float normalize_angle_error(float error_deg)
-{
-    while (error_deg > 180.0f)  error_deg -= 360.0f;
-    while (error_deg <= -180.0f) error_deg += 360.0f;
-    return error_deg;
-}
-
 void steer_pid_init(float kp, float ki, float kd, float max_turn)
 {
-    steer_control.target_yaw = 0.0f;
-    steer_control.current_yaw = 0.0f;
     steer_control.turn_output = 0.0f;
     steer_control.base_speed = 0.0f;
     steer_control.max_turn_output = max_turn;
 
-    /* 航向 PID：输出 = 差速补偿量（脉冲/秒），限幅 ±max_turn */
+    /* 转向 PID：输出 = 差速补偿量（脉冲/秒），限幅 ±max_turn
+     * setpoint=0（目标是循迹偏差为0，即居中） */
     float output_max = max_turn;
     float ilim = calc_steer_integral_limit(ki, output_max);
     pid_init(&steer_control.pid, kp, ki, kd, -output_max, output_max, ilim);
-}
-
-void steer_pid_set_target_yaw(float yaw_deg)
-{
-    steer_control.target_yaw = yaw_deg;
+    steer_control.pid.setpoint = 0.0f;
 }
 
 void steer_pid_set_base_speed(float base_speed_counts)
@@ -346,19 +335,9 @@ void steer_pid_set_base_speed(float base_speed_counts)
     steer_control.base_speed = base_speed_counts;
 }
 
-void steer_pid_reset_yaw_zero(float current_yaw_deg)
+float steer_pid_get_base_speed(void)
 {
-    steer_control.current_yaw = current_yaw_deg;
-    steer_control.target_yaw = current_yaw_deg;
-    pid_reset(&steer_control.pid);
-}
-
-void steer_pid_adjust_yaw(float delta_deg)
-{
-    steer_control.target_yaw += delta_deg;
-    /* 目标角度也做归一化，防止累积溢出 */
-    while (steer_control.target_yaw > 180.0f)  steer_control.target_yaw -= 360.0f;
-    while (steer_control.target_yaw <= -180.0f) steer_control.target_yaw += 360.0f;
+    return steer_control.base_speed;
 }
 
 void steer_pid_stop(void)
@@ -416,32 +395,30 @@ void steer_pid_get_param(float *kp, float *ki, float *kd)
     if (kp) *kp = steer_control.pid.kp;
     if (ki) *ki = steer_control.pid.ki;
     if (kd) *kd = steer_control.pid.kd;
-    uart_printf(UART0, "Steer PID: kp=%5.3f ki=%5.3f kd=%5.3f  target=%5.1fdeg  base=%5.1f\r\n",
+    uart_printf(UART0, "Steer PID: kp=%5.3f ki=%5.3f kd=%5.3f  base=%5.1f  max_turn=%5.1f\r\n",
                 steer_control.pid.kp, steer_control.pid.ki, steer_control.pid.kd,
-                steer_control.target_yaw, steer_control.base_speed);
+                steer_control.base_speed, steer_control.max_turn_output);
 }
 
 /* 核心：差速合成
- * 规则：右转 → yaw 增加 → error 正 → turn_output 正
- *       turn_output 正 → 左轮更快，右轮更慢 → 车辆右转
- * 所以：
+ * 输入 position_error 来自循迹加权偏差：
+ *   正值 = 车偏左（线在右侧）→ 需右转
+ *   负值 = 车偏右（线在左侧）→ 需左转
+ *
+ * PID 输出 turn_output（脉冲/秒差速补偿）：
+ *   error 正 → turn_output 正 → 左轮快、右轮慢 → 车辆右转 ✓
+ *   error 负 → turn_output 负 → 左轮慢、右轮快 → 车辆左转 ✓
+ *
+ * 差速合成：
  *   target_left  = base_speed + turn_output
  *   target_right = base_speed - turn_output
  * （注意：左右轮向前时 setpoint 都为正值） */
-void steer_pid_update(float current_yaw_deg, uint32_t dt_ms)
+void steer_pid_update(float position_error, uint32_t dt_ms)
 {
-    steer_control.current_yaw = current_yaw_deg;
-
-    /* 角度误差归一化（最短路径转向） */
-    float raw_error = steer_control.target_yaw - current_yaw_deg;
-    float error = normalize_angle_error(raw_error);
-
-    /* PID 计算：输出 = 差速补偿（脉冲/秒） */
+    /* PID 计算：偏差直接作为误差（setpoint=0，目标是居中） */
+    float error = position_error;
     float dt = (float)dt_ms / 1000.0f;
-    /* 直接复用 pid_update 内部公式，将 error 先写入 setpoint 以便 pid_update 计算
-     * 但 pid_update 以 feedback 为输入，我们直接传入 error 的负值不合适。
-     * 更干净的办法：把 current_yaw 映射为 0-centered。这里手动计算。*/
-    /* --- 手动展开最小 PID（避免改 global setpoint 污染其它逻辑） --- */
+
     PID_Controller_t *pid = &steer_control.pid;
     pid->integral += error * dt;
     if (pid->integral > pid->integral_limit)
@@ -469,8 +446,7 @@ void steer_pid_update(float current_yaw_deg, uint32_t dt_ms)
     float target_left  = base + turn;
     float target_right = base - turn;
 
-    /* 饱和处理：确保单轮不超过 ±MOTOR_PWM_MAX_DUTY 等效的目标速度
-     * 注意：目标速度 counts/s 上限取决于电机满转的编码器读数，保守用 8000 限制 */
+    /* 饱和限幅（保守上限 8000 脉冲/秒） */
     float speed_limit = 8000.0f;
     if (target_left >  speed_limit) target_left =  speed_limit;
     if (target_left < -speed_limit) target_left = -speed_limit;
