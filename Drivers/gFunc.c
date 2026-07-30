@@ -13,7 +13,7 @@ volatile uint8_t encoder_flag = 0; /* 20ms 调试输出 */
 volatile uint8_t oled_flag = 0;    /* 100ms OLED 刷新 */
 
 /* 调试模式：1=仅速度环（禁用循迹保护），0=正常模式 */
-volatile uint8_t debug_speed_only = 1;
+volatile uint8_t debug_speed_only = 0;
 
 void TIMER_0_INST_IRQHandler(void)
 {
@@ -537,6 +537,55 @@ static void uart_cmd_debug_speed_off(const char *args)
     uart_printf(UART0, "OK normal mode (patrol protection on)\r\n");
 }
 
+/* 方向环完整状态查询：gsteer */
+static void uart_cmd_gsteer(const char *args)
+{
+    (void)args;
+    steer_print_status();
+}
+
+/* 方向环每拍调试输出开关：sdebug <0|1> */
+static void uart_cmd_sdebug(const char *args)
+{
+    const char *p = uart_find_next_arg(args);
+    if (*p == '\0') {
+        uart_printf(UART0, "Steer debug: %s (sdebug 0=off, 1=on, per 20ms step)\r\n",
+                    steer_get_debug() ? "ON" : "OFF");
+        return;
+    }
+    int on = uart_atoi(p);
+    steer_set_debug(on ? 1 : 0);
+    uart_printf(UART0, "OK steer debug: %s\r\n", steer_get_debug() ? "ON" : "OFF");
+}
+
+/* 方向环状态复位：steer_reset（PID清零 + 停车态，不清debug开关） */
+static void uart_cmd_steer_reset(const char *args)
+{
+    (void)args;
+    steer_reset();
+    uart_printf(UART0, "OK steer reset (PID + state cleared, debug flag kept)\r\n");
+}
+
+/* 简单查表法巡线开关：simpletest <0|1>
+ *   simpletest 1 → 走 patrol_simple_run（无PID，if-else查表，适合 Bring-Up 验证极性）
+ *   simpletest 0 → 走原 PID 方向环 steer_step（默认）
+ *   simpletest   → 查询当前状态 */
+static void uart_cmd_simpletest(const char *args)
+{
+    const char *p = uart_find_next_arg(args);
+    if (*p == '\0') {
+        uart_printf(UART0, "Simple patrol: %s  (simpletest 0=PID steer, 1=if-else table)\r\n",
+                    patrol_get_simple_mode() ? "ON (table)" : "OFF (PID steer)");
+        return;
+    }
+    int on = uart_atoi(p);
+    patrol_set_simple_mode(on ? 1 : 0);
+    /* 切换模式时清理方向环 PID 和状态，避免旧参数/状态干扰 */
+    steer_reset();
+    uart_printf(UART0, "OK Simple patrol: %s\r\n",
+                patrol_get_simple_mode() ? "ON (table, no PID)" : "OFF (PID steer)");
+}
+
 /* ==================== 计时器命令 ==================== */
 
 /* 处理计时器开始命令：tstart */
@@ -601,6 +650,10 @@ static void uart_cmd_help(void)
     uart_printf(UART0, "  gpatrol                   - Show patrol sensors + error\r\n");
     uart_printf(UART0, "  sbase <cnt/s>             - Set base forward speed (0=stop)\r\n");
     uart_printf(UART0, "  sstop                     - Stop steer + speed loop\r\n");
+    uart_printf(UART0, "  gsteer                    - Full steer status (state/sensors/PID/targets)\r\n");
+    uart_printf(UART0, "  sdebug <0|1>              - Per-step steer trace (S: ... line, 50Hz)\r\n");
+    uart_printf(UART0, "  steer_reset               - Reset steer PID+state (keeps debug flag)\r\n");
+    uart_printf(UART0, "  simpletest <0|1>          - Simple patrol: 0=PID steer (def), 1=if-else table\r\n");
     uart_printf(UART0, "\r\n");
     uart_printf(UART0, "Timer (OLED Display):\r\n");
     uart_printf(UART0, "  tstart                    - Start timer\r\n");
@@ -697,6 +750,28 @@ void uart_cmd_process(void)
                (cmd[5] == ' ' || cmd[5] == '\t' || cmd[5] == '\0')) {
         /* sstop */
         uart_cmd_sstop(cmd);
+    } else if (cmd[0] == 'g' && cmd[1] == 's' && cmd[2] == 't' && cmd[3] == 'e' &&
+               cmd[4] == 'e' && cmd[5] == 'r' &&
+               (cmd[6] == ' ' || cmd[6] == '\t' || cmd[6] == '\0')) {
+        /* gsteer */
+        uart_cmd_gsteer(cmd);
+    } else if (cmd[0] == 's' && cmd[1] == 'd' && cmd[2] == 'e' && cmd[3] == 'b' &&
+               cmd[4] == 'u' && cmd[5] == 'g' &&
+               (cmd[6] == ' ' || cmd[6] == '\t' || cmd[6] == '\0')) {
+        /* sdebug <0|1> */
+        uart_cmd_sdebug(cmd);
+    } else if (cmd[0] == 's' && cmd[1] == 't' && cmd[2] == 'e' && cmd[3] == 'e' &&
+               cmd[4] == 'r' && cmd[5] == '_' && cmd[6] == 'r' && cmd[7] == 'e' &&
+               cmd[8] == 's' && cmd[9] == 'e' && cmd[10] == 't' &&
+               (cmd[11] == ' ' || cmd[11] == '\t' || cmd[11] == '\0')) {
+        /* steer_reset */
+        uart_cmd_steer_reset(cmd);
+    } else if (cmd[0] == 's' && cmd[1] == 'i' && cmd[2] == 'm' && cmd[3] == 'p' &&
+               cmd[4] == 'l' && cmd[5] == 'e' && cmd[6] == 't' && cmd[7] == 'e' &&
+               cmd[8] == 's' && cmd[9] == 't' &&
+               (cmd[10] == ' ' || cmd[10] == '\t' || cmd[10] == '\0')) {
+        /* simpletest <0|1> */
+        uart_cmd_simpletest(cmd);
     } else if (cmd[0] == 'd' && cmd[1] == 'e' && cmd[2] == 'b' && cmd[3] == 'u' && 
                cmd[4] == 'g' && cmd[5] == '_' && cmd[6] == 's' && cmd[7] == 'p' &&
                cmd[8] == 'e' && cmd[9] == 'e' && cmd[10] == 'd' && cmd[11] == '_' &&

@@ -38,14 +38,40 @@ typedef struct {
     float  last_out;       /* speed_update 最近一次实际输出（限幅后，下发 PWM 前） */
 } MotorSpeed_t;
 
+/* 方向环运行状态（便于调试/日志/上位机可视化） */
+typedef enum {
+    STEER_STOPPED   = 0,  /* 已停车 / 未激活 */
+    STEER_STRAIGHT  = 1,  /* 直线行驶（|error| 小） */
+    STEER_TURN_L    = 2,  /* 左转修正中（error < 0） */
+    STEER_TURN_R    = 3,  /* 右转修正中（error > 0） */
+    STEER_LOST      = 4,  /* 丢线保护（PATROL_LOST） */
+    STEER_JUNCTION  = 5,  /* 路口/十字（PATROL_JUNCTION） */
+} SteerState_t;
+
+/* 方向环调试快照（steer_step 每拍更新，供 gsteer / S: 输出读取） */
+typedef struct {
+    float          error;         /* 最近一次循迹加权误差 [-3, +3] */
+    float          turn;          /* 最近一次 PID 差速输出（限幅后） */
+    float          target_left;   /* 下发给左轮速度环的目标（counts/s） */
+    float          target_right;  /* 下发给右轮速度环的目标（counts/s） */
+    uint8_t        sen_r2;        /* 传感器原始位（从 patrol 快照） */
+    uint8_t        sen_r1;
+    uint8_t        sen_l1;
+    uint8_t        sen_l2;
+    SteerState_t   state;         /* 当前运行状态 */
+    uint8_t        debug_enable;  /* 1 = 每拍打 "S: ..." 调试串 */
+    uint16_t       step_cnt;      /* steer_step 调用计数（用于分频输出等） */
+} SteerDebug_t;
+
 /* ==========================================================================
  * 方向环：每 20ms 调用一次 steer_step()
  * 循迹误差 ∈ [-3, +3] → PID → 差速补偿 → 叠加到左右轮基础速度
  * ========================================================================== */
 typedef struct {
-    PID_t  pid;
-    float  base_speed;
-    float  max_turn;
+    PID_t        pid;
+    float        base_speed;
+    float        max_turn;
+    SteerDebug_t dbg;            /* 调试快照 + 运行状态 */
 } Steer_t;
 
 /* 全局实例 */
@@ -74,15 +100,23 @@ void  speed_update(MotorSpeed_t *s, int32_t delta, float dt_ms);
 void  speed_stop(MotorSpeed_t *s);
 
 /* ---------------- 方向环 ---------------- */
-void  steer_init(float kp, float ki, float kd, float max_turn);
-void  steer_set_base(float base);
-void  steer_set_kp(float kp);
-void  steer_set_ki(float ki);
-void  steer_set_kd(float kd);
-void  steer_set_param(float kp, float ki, float kd);
-void  steer_get_param(float *kp, float *ki, float *kd, float *base, float *max_turn);
-void  steer_step(float error, float dt_ms);
-void  steer_stop(void);
+void         steer_init(float kp, float ki, float kd, float max_turn);
+void         steer_set_base(float base);
+void         steer_set_kp(float kp);
+void         steer_set_ki(float ki);
+void         steer_set_kd(float kd);
+void         steer_set_param(float kp, float ki, float kd);
+void         steer_get_param(float *kp, float *ki, float *kd, float *base, float *max_turn);
+void         steer_step(float error, float dt_ms);
+void         steer_stop(void);
+/* 方向环调试接口 */
+void         steer_set_debug(uint8_t enable);                  /* sdebug 0/1 开关每拍调试输出 */
+uint8_t      steer_get_debug(void);                            /* 查询调试开关状态 */
+void         steer_reset(void);                                /* 状态复位：PID清零 + state=STOPPED */
+void         steer_update_sensors(uint8_t r2, uint8_t r1, uint8_t l1, uint8_t l2); /* wheels.c 中每次读传感器后调用 */
+void         steer_set_state(SteerState_t st);                 /* 丢线/路口等外部条件改变状态时调用 */
+const char*  steer_state_name(SteerState_t st);                /* 状态名 → "STRAIGHT"/"TURN_L"/... 便于打印 */
+void         steer_print_status(void);                         /* 打印完整方向环状态（gsteer 命令用） */
 
 /* ---------------- 应用层 ---------------- */
 void  pid_app_init(void);

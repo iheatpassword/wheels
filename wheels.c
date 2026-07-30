@@ -48,6 +48,11 @@
 /* 外部变量：调试模式标志（定义在 gFunc.c） */
 extern volatile uint8_t debug_speed_only;
 
+/* 简单巡线模式开关（定义在 patrol.c，由 simpletest 命令控制）
+ *   0 = PID 方向环 steer_step（默认，调参后正式运行）
+ *   1 = if-else 查表法 patrol_simple_run（Bring-Up 阶段验证极性/接线/安装，无需调参） */
+extern volatile uint8_t patrol_simple_mode;
+
 /* 外部变量：控制周期标志（定义在 gFunc.c）
  * steer_flag:   20ms (50Hz) 方向环 - 循迹读传感器 + 转向 PID
  * speed_flag:   10ms (100Hz) 速度环 - 速度 PID → PWM 输出
@@ -138,16 +143,10 @@ int main(void)
     // OLED_Clear();
     // /* 初始化计时器（OLED 显示计时） - 必须在 OLED_Clear 之后 */
     // timer_init();
-
-    // speed_set_target(&g_spd_left, -1000);
-    // speed_set_target(&g_spd_right, -4000);
-    // motor_set_speed(MOTOR_RIGHT, 200);
-    // motor_set_speed(MOTOR_LEFT, 200);
     
 
     while (1) {
         led_test();
-        // motor_test();
         /* 处理串口命令 */
         uart_cmd_process();
 
@@ -161,27 +160,51 @@ int main(void)
         /* 20ms 周期 (50Hz): 方向环
          * 读取循迹传感器 → 计算转向 PID → 设置左右轮目标速度
          * 方向环独立于速度环运行，提供目标速度给速度环跟踪
+         *
+         * 两种模式由 patrol_simple_mode（simpletest 命令）二选一：
+         *   mode=0（默认）：patrol_get_error 加权偏差 → steer_step(PID方向环)
+         *   mode=1（简单） ：patrol_simple_run 直接查表给左右轮目标（无需调参，先验证极性）
          */
-        // if (steer_flag)
-        // {
-        //     steer_flag = 0;
+        if (steer_flag)
+        {
+            steer_flag = 0;
 
-        //     if (!debug_speed_only)
-        //     {
-        //         float error;
-        //         PatrolStatus_t st = patrol_get_error(&error);
+            if (!debug_speed_only)
+            {
+                if (patrol_simple_mode) {
+                    /* ================ 简单巡线模式（if-else 查表，无PID） ================
+                     * 不经过 patrol_get_error / steer_step，
+                     * patrol_simple_run 内部自己读传感器、按 nibble 查表分配速度、
+                     * 调用 speed_set_target，同时同步 steer.dbg 快照和状态。
+                     * 丢线/路口直接在 patrol_simple_run 内处理为停车 (0,0)。
+                     * ================================================================ */
+                    float base = g_steer.base_speed;
+                    if (base < 1.0f) base = 1500.0f;   /* 忘记 sbase 时给个默认起步速度 */
+                    patrol_simple_run(base);
+                } else {
+                    /* ================ PID 方向环模式（默认） ================ */
+                    float error;
+                    uint8_t r2, r1, l1, l2;
+                    PatrolStatus_t st = patrol_get_error(&error);
 
-        //         /* 边界保护：丢线/路口停车 */
-        //         if (st == PATROL_LOST || st == PATROL_JUNCTION)
-        //         {
-        //             steer_stop();
-        //         }
-        //         else
-        //         {
-        //             steer_step(error, 20);
-        //         }
-        //     }
-        // }
+                    /* 把传感器原始状态送入方向环调试快照（便于 gsteer / S: 调试串查看） */
+                    patrol_get_raw(&r2, &r1, &l1, &l2);
+                    steer_update_sensors(r2, r1, l1, l2);
+
+                    /* 边界保护：丢线/路口停车 */
+                    if (st == PATROL_LOST || st == PATROL_JUNCTION)
+                    {
+                        if (st == PATROL_LOST)     steer_set_state(STEER_LOST);
+                        else                       steer_set_state(STEER_JUNCTION);
+                        steer_stop();
+                    }
+                    else
+                    {
+                        steer_step(error, 20);
+                    }
+                }
+            }
+        }
 
         /* 10ms 周期 (100Hz): 速度环 + 调试输出
          * 采样编码器增量（打时间戳）→ 真实 dt 算速度 → PID → PWM → 调试串口
@@ -194,7 +217,7 @@ int main(void)
             float dtl = 0.0f, dtr = 0.0f;
             int32_t dl = encoder_sample_left(&dtl);
             int32_t dr = encoder_sample_right(&dtr);
-            uart_printf(UART0,"d: %d,%d\r\n",dl,dr);
+            
             /* dt=0 表示首次采样，无基准，跳过本次 PID */
             if (dtl > 0.0f) {
                 speed_update(&g_spd_left,  dl, dtl);

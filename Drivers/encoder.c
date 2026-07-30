@@ -66,7 +66,7 @@ int32_t encoder_sample_right(float *dt_ms)
     first = 0;
     last_tick = now;
     if (dt_ms) *dt_ms = dt;
-    return temp;
+    return -temp;
 }
 
 void encoder_reset(void)

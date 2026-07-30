@@ -27,6 +27,49 @@ typedef enum {
 
 extern PatrolData_t patrol_data;
 
+/* ==================== 简单巡线模式（无PID，if-else查表法，调试用） ====================
+ * 开关：patrol_simple_mode（0=PID方向环 steer_step，1=简单查表 patrol_simple_run）
+ * 优点：不依赖调参，上电即可跑，适合先验证传感器/电机极性和物理安装是否正确。
+ * 缺点：无平滑，有抖动，过弯不漂亮，仅用于 Bring-Up 阶段。
+ *
+ * 调用方式：wheels.c 的 steer_flag 分支里，按模式二选一：
+ *   if (patrol_simple_mode) patrol_simple_run(base_speed_cnts);
+ *   else                     steer_step(error, 20);
+ * ========================================================================== */
+extern volatile uint8_t patrol_simple_mode;
+
+/* 获取/设置简单模式（simpletest 命令用） */
+uint8_t patrol_get_simple_mode(void);
+void    patrol_set_simple_mode(uint8_t on);
+
+/**
+ * @brief  简单查表法巡线（不经过 PID 方向环）
+ *
+ * 直接根据 4 路传感器的触发组合给左右轮分配固定目标速度，
+ * 通过串口命令 simpletest <0|1> 和原 PID 方向环互斥切换。
+ *
+ * 策略（左→右 r2 r1 | l1 l2）：
+ *   0000 (全白=丢线)          → 停车 (0, 0)
+ *   1111 (全黑=路口)          → 停车 (0, 0)
+ *   0010 / 0100 (居中：r1或l1单触发，或都触发) → 直行 (B, B)
+ *   0110 (r1+l1 同时)         → 直行 (B, B)
+ *   0001 (仅 l2 = 右外=车极度偏左) → 急右转 (B, 0.3B)
+ *   0011 (l1+l2 = 右半边)     → 大右转 (B, 0.6B)
+ *   0101 (r1+l2 少见组合)     → 按 r1优先(偏右) → 微左转
+ *   0111 (r1+l1+l2 = 车偏左严重) → 大右转 (B, 0.5B)
+ *   1000 (仅 r2 = 左外=车极度偏右) → 急左转 (0.3B, B)
+ *   1100 (r2+r1 = 左半边)     → 大左转 (0.6B, B)
+ *   1001 (r2+l2 对角)         → 直行 (安全退化)
+ *   1010 (r2+l1)              → 直行
+ *   1011 (r2+l1+l2)           → 右转
+ *   1101 (r2+r1+l2)           → 左转
+ *   1110 (r2+r1+l1)           → 左转
+ *
+ * @param  base_speed  基础前进速度 (counts/s，与 sbase 同一量级，例如 1500~2000)
+ *                     内部自动把差速分配好，直接调用速度环的 speed_set_target。
+ */
+void patrol_simple_run(float base_speed);
+
 /* ==================== 接口函数 ==================== */
 
 /* 读取 4 路传感器原始数据 */
